@@ -1,0 +1,26 @@
+WatchBridge - ממשק גרפי באנגלית
+
+1. חלץ את החבילה לתיקייה חדשה. אל תחליף את תיקיית הסקריפט הישן.
+2. נדרש Python 3.10 ומעלה עם Python Launcher.
+3. לחץ פעמיים על RUN.bat. בהפעלה הראשונה יותקנו התלויות.
+4. בחלון Connections בחר Import config.json וטען את קובץ ההגדרות הקיים שלך:
+   T:\Downloads\PlexWatchedSync\config.json
+5. לחץ Test Connections, ולאחר מכן Dry Run בעמוד Scan & sync.
+6. אחרי בדיקת התוצאות, לחץ Apply Tags לריצה שמוסיפה תגיות.
+
+אפשר לבחור All ready torrents או Selected ready torrents.
+בבחירה של Selected ready torrents סמן שורות בטבלה עם Ctrl או Shift.
+Export CSV מייצא את כל תוצאות הווידיאו. פריטים ללא וידיאו מוחרגים.
+
+לשמירת הסיסמה והטוקן באופן מוצפן עבור משתמש Windows שלך:
+סמן Remember credentials ולחץ Save Settings.
+ההגדרות נשמרות מחוץ לתיקיית התוכנה ולכן אינן מצורפות לחבילת השיתוף.
+
+ליצירת EXE עבור החברים:
+הרץ BUILD_EXE.bat במחשב Windows. בסיום שתף רק את:
+dist\WatchBridge-Windows.zip
+החברים לא יצטרכו להתקין Python. כל אחד יזין את פרטי החיבור שלו.
+
+החבילה כוללת קוד מקור וקובצי הפעלה ובנייה, ולא EXE שכבר נבנה.
+בדיקות הלוגיקה הורצו עם נתוני API מדומים. בדיקת ממשק Windows, הצפנת
+DPAPI ובניית EXE בפועל צריכות להתבצע במחשב Windows.

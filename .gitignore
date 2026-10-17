@@ -1,0 +1,34 @@
+# Python and build outputs
+.venv/
+.build-venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+*.spec
+*.egg-info/
+
+# Personal connection details and secrets
+config.json
+config.*.json
+settings.json
+settings.tmp
+.env
+.env.*
+*.key
+*.pem
+
+# Private reports and local runtime data
+reports/
+watched*.csv
+watchbridge-*.csv
+*.log
+*.zip
+
+# Editors and OS files
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

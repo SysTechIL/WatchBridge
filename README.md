@@ -42,7 +42,7 @@ The app adds one existing tag, and does not delete anything or remove existing t
 
 The test suite uses fake APIs to cover matching, pagination, profile selection,
 new/old login responses, error handling, report filtering, cancellation and add-only
-tag updates and clipboard editing with Hebrew Windows layouts. All 31 tests pass
+tag updates and clipboard editing with Hebrew Windows layouts. All 34 tests pass
 without live server access. Windows EXE packaging, native DPAPI
 encryption and native GUI appearance require verification on Windows.
 

@@ -4,6 +4,25 @@
 
 A Windows desktop GUI for adding a qBittorrent tag based on one Plex user's watched state.
 
+## Screenshots
+
+### Scan, results and filtering
+
+![WatchBridge scan results and status filter](docs/images/scan-and-sync-redacted.png)
+
+<details>
+<summary>Activity and help</summary>
+
+### Activity and reports
+
+![WatchBridge activity log](docs/images/activity.png)
+
+### Help and matching rules
+
+![WatchBridge help screen](docs/images/help.png)
+
+</details>
+
 ## Run
 
 Install Python 3.10+ with the Python Launcher, extract the source ZIP, and double-click `RUN.bat`.

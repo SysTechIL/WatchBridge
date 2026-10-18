@@ -1,3 +1,5 @@
+<div dir="rtl" align="right">
+
 # WatchBridge
 
 עברית | [English](README.md)
@@ -5,11 +7,30 @@
 אפליקציית Windows עם ממשק באנגלית שמסנכרנת מצב צפייה מפרופיל Plex אחד לתגיות
 ב-qBittorrent. ההתאמה מתבצעת לפי הנתיב המלא של קובצי הווידיאו.
 
+## צילומי מסך
+
+### סריקה, תוצאות וסינון
+
+![מסך הסריקה עם תוצאות וסינון לפי מצב](docs/images/scan-and-sync-redacted.png)
+
+<details>
+<summary>יומן פעילות ועזרה</summary>
+
+### יומן פעילות ודוחות
+
+![יומן הפעילות של האפליקציה](docs/images/activity.png)
+
+### עזרה וכללי התאמה
+
+![מסך העזרה באנגלית](docs/images/help.png)
+
+</details>
+
 ## יכולות
 
-- **Dry Run:** סריקה יבשה ללא שינוי בתגיות.
-- **Apply Tags:** הוספת תג לכל הטורנטים המוכנים או לפריטים נבחרים בלבד.
-- **Export CSV:** ייצוא תוצאות, מספר קבצים שנצפו ונתיבים שלא הותאמו.
+- **סריקה יבשה (Dry Run):** בדיקת התוצאות ללא שינוי בתגיות.
+- **הוספת תגיות (Apply Tags):** הוספת תג לכל הטורנטים המוכנים או לפריטים נבחרים בלבד.
+- **ייצוא ל-CSV (Export CSV):** שמירת התוצאות, מספר הקבצים שנצפו ונתיבים שלא הותאמו.
 - חיפוש, סינון, התקדמות, יומן פעילות ועצירה.
 - תמיכה בסרטים, בפרקים בודדים ובחבילות של עונות וסדרות.
 - אימות פרופיל Plex ובדיקת החיבורים לשני השירותים.
@@ -22,7 +43,7 @@
 
 ## דרישות
 
-- Windows 10 או Windows 11.
+- מערכת הפעלה: Windows 10 או Windows 11.
 - שרת Plex נגיש וחשבון עם גישה לספריות.
 - qBittorrent עם ממשק Web UI פעיל והתג המבוקש שכבר קיים, למשל `Watched`.
 - נתיבי Windows זהים כפי שהם מופיעים ב-Plex וב-qBittorrent.
@@ -39,10 +60,14 @@
 
 כתובות לדוגמה כאשר השירותים מותקנים במחשב המקומי:
 
+<div dir="ltr" align="left">
+
 ```text
 Plex:        http://localhost:32400
 qBittorrent: http://localhost:8080
 ```
+
+</div>
 
 אם השירותים מותקנים במחשב אחר, החלף את `localhost` בשם או בכתובת שלו.
 פרטי החיבור ל-qBittorrent הם של ממשק ה-Web UI.
@@ -66,7 +91,7 @@ qBittorrent: http://localhost:8080
 | Incomplete | התוכן נצפה, אך ההורדה טרם הושלמה. |
 | Error | קריאת API נכשלה. יש לפתור את התקלה ולסרוק שוב לפני הוספת תגיות. |
 
-**Dry Run לא מוסיף תגיות.** Apply Tags קורא מחדש את מצב הצפייה ואת נתיבי הקבצים
+**סריקה יבשה (Dry Run) לא מוסיפה תגיות.** Apply Tags קורא מחדש את מצב הצפייה ואת נתיבי הקבצים
 לפני ההוספה. לאחר שינוי הגדרות החיבור נדרשת סריקה חדשה.
 להוספה לפריטים מסוימים, בחר שורות בעזרת Ctrl או Shift ובחר
 **Selected ready torrents** במקום **All ready torrents**.
@@ -85,7 +110,7 @@ qBittorrent: http://localhost:8080
 
 ## דוחות ואוטומציה
 
-**Export CSV** מייצא את כל תוצאות הווידיאו, ללא קשר לסינון הנוכחי בטבלה.
+**ייצוא ל-CSV (Export CSV)** כולל את כל תוצאות הווידיאו, ללא קשר לסינון הנוכחי בטבלה.
 דוחות אוטומטיים נשמרים לאחר סריקות ועדכוני תגיות. אפשר לפתוח אותם דרך
 **Activity > Open Reports Folder**.
 
@@ -98,15 +123,23 @@ qBittorrent: http://localhost:8080
 
 במחשב Windows הפעל:
 
+<div dir="ltr" align="left">
+
 ```text
 BUILD_EXE.bat
 ```
 
+</div>
+
 בסיום ייווצר:
+
+<div dir="ltr" align="left">
 
 ```text
 dist/WatchBridge-Windows.zip
 ```
+
+</div>
 
 שתף את ה-ZIP הזה. הוא כולל `WatchBridge.exe` עצמאי והוראות באנגלית, והמקבלים
 לא יצטרכו להתקין Python. כל משתמש מזין את פרטי החיבור שלו.
@@ -116,10 +149,14 @@ dist/WatchBridge-Windows.zip
 
 הנתונים האישיים נשמרים מחוץ לתיקיית התוכנה:
 
+<div dir="ltr" align="left">
+
 ```text
 %LOCALAPPDATA%\WatchBridge\settings.json
 %LOCALAPPDATA%\WatchBridge\reports\
 ```
+
+</div>
 
 הטוקן והסיסמה נשמרים בזיכרון בלבד, אלא אם סומנה **Remember credentials**.
 בשמירה נעשה שימוש ב-Windows DPAPI עבור המשתמש הנוכחי. יתר הגדרות החיבור הן
@@ -131,11 +168,15 @@ JSON רגיל. להסרת הסודות השמורים, בטל את האפשרו�
 
 ## פיתוח ובדיקות
 
+<div dir="ltr" align="left">
+
 ```powershell
 py -3 -m pip install -r requirements.txt
 py -3 -m unittest discover -s tests -v
 py -3 watchbridge.py
 ```
+
+</div>
 
 34 בדיקות הלוגיקה משתמשות בנתוני API ובשדות קלט מדומים. הן מכסות התאמת נתיבים, חבילות
 עונות, פרקים באותו קובץ, עימוד תוצאות, פרופילים, התחברות, עצירה וסינון דוחות.
@@ -147,3 +188,5 @@ py -3 watchbridge.py
 ## רישיון
 
 [MIT](LICENSE). זהו פרויקט עצמאי שאינו קשור רשמית ל-Plex או ל-qBittorrent.
+
+</div>

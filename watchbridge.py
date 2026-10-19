@@ -30,7 +30,7 @@ STATUS = {'READY': 'Ready', 'TAGGED': 'Tagged', 'UNWATCHED': 'Unwatched',
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('WatchBridge | Plex to qBittorrent')
+        self.title('WatchBridge | Plex or Jellyfin to qBittorrent')
         icon = Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'assets' / 'watchbridge.ico'
         if sys.platform == 'win32' and icon.exists():
             self.iconbitmap(str(icon))
@@ -60,7 +60,7 @@ class App(tk.Tk):
         self.scope = tk.StringVar(value='All ready torrents')
         self.auto = tk.BooleanVar(value=False)
         self.show_secrets = tk.BooleanVar(value=False)
-        self.current_profile = tk.StringVar(value='No Plex profile connected')
+        self.current_profile = tk.StringVar(value='No media server profile connected')
         self.phase = tk.StringVar(value='Connect your accounts, then start a dry run.')
         self.connection_state = tk.StringVar(value='NOT CONNECTED')
         self.footer_text = tk.StringVar(value='No changes made. Non-video torrents are excluded.')
@@ -76,7 +76,9 @@ class App(tk.Tk):
         self.after(1000, self.auto_tick)
         if self.error_on_load:
             self.after(300, lambda: messagebox.showwarning('Settings', self.error_on_load))
-        self.show_page('Connections' if not values.get('plex_token') else 'Scan & sync')
+        configured = (values.get('jf_user') and (values.get('jf_api_key') or values.get('jf_password'))
+                      if values.get('media_server') == 'jellyfin' else values.get('plex_token'))
+        self.show_page('Scan & sync' if configured else 'Connections')
 
     def _style(self):
         self.option_add('*Font', ('Segoe UI', 10))
@@ -105,6 +107,9 @@ class App(tk.Tk):
                     borderwidth=0, arrowcolor=MUTED)
         s.configure('TCheckbutton', background=PANEL, foreground=TEXT, padding=4)
         s.map('TCheckbutton', background=[('active', PANEL)])
+        s.configure('TRadiobutton', background=PANEL, foreground=TEXT, padding=4,
+                    indicatorbackground=CARD, indicatorforeground=BLUE, upperbordercolor=MUTED, lowerbordercolor=MUTED)
+        s.map('TRadiobutton', background=[('active', PANEL)], indicatorbackground=[('pressed', CARD)])
 
     def label(self, parent, text='', size=10, color=TEXT, bg=BG, bold=False, **kw):
         return tk.Label(parent, text=text, bg=bg, fg=color,
@@ -122,7 +127,7 @@ class App(tk.Tk):
         sidebar.pack_propagate(False)
         self.label(sidebar, 'W', 28, TEAL, PANEL, True).pack(anchor='w', padx=25, pady=(28, 0))
         self.label(sidebar, 'WatchBridge', 20, TEXT, PANEL, True).pack(anchor='w', padx=25)
-        self.label(sidebar, 'Plex to qBittorrent', 10, MUTED, PANEL).pack(anchor='w', padx=25, pady=(4, 32))
+        self.label(sidebar, 'Plex / Jellyfin to qBittorrent', 10, MUTED, PANEL).pack(anchor='w', padx=25, pady=(4, 32))
         self.nav = {}
         self.pages = {}
         for name in ('Scan & sync', 'Connections', 'Activity', 'Help'):
@@ -134,7 +139,7 @@ class App(tk.Tk):
         self.label(bottom, 'ADD TAGS ONLY', 9, TEAL, PANEL, True).pack(anchor='w')
         self.label(bottom, 'Your media stays where it is.\nNo deletion. No tag removal.', 9,
                    MUTED, PANEL, justify='left').pack(anchor='w', pady=(8, 14))
-        self.label(bottom, 'v1.0.2  /  Windows', 9, MUTED, PANEL).pack(anchor='w')
+        self.label(bottom, 'v1.1.0  /  Windows', 9, MUTED, PANEL).pack(anchor='w')
         outer = tk.Frame(self, bg=BG)
         outer.pack(side='left', fill='both', expand=True, padx=28, pady=24)
         top = tk.Frame(outer, bg=BG)
@@ -233,19 +238,9 @@ class App(tk.Tk):
         columns.pack(fill='x')
         self.inputs = []
         self.secret_entries = []
-        for i, (title, subtitle, fields) in enumerate([
-            ('Plex', 'Read watch history for one profile', [
-                ('Server URL', 'plex_url', False), ('Personal token', 'plex_token', True),
-                ('Profile name (optional)', 'plex_user', False)]),
-            ('qBittorrent', 'Add the tag to matching video torrents', [
-                ('Web UI URL', 'qb_url', False), ('Web UI username', 'qb_username', False),
-                ('Web UI password', 'qb_password', True), ('Existing tag', 'tag', False)])]):
-            card = tk.Frame(columns, bg=PANEL, padx=20, pady=18)
-            card.grid(row=0, column=i, sticky='nsew', padx=(0 if i==0 else 14, 0))
-            columns.columnconfigure(i, weight=1, uniform='connections')
-            self.label(card, title, 17, TEXT, PANEL, True).pack(anchor='w')
-            self.label(card, subtitle, 9, MUTED, PANEL).pack(anchor='w', pady=(4, 18))
-            for label, key, secret in fields:
+
+        def fields(card, items):
+            for label, key, secret in items:
                 self.label(card, label, 10, MUTED, PANEL).pack(anchor='w', pady=(0, 5))
                 entry = ttk.Entry(card, textvariable=self.vars[key], show='*' if secret else '')
                 entry.pack(fill='x', pady=(0, 12))
@@ -253,14 +248,43 @@ class App(tk.Tk):
                 self.inputs.append(entry)
                 if secret:
                     self.secret_entries.append(entry)
-            if i==0:
-                self.label(card, 'Leave profile blank to use the token owner.\nEnter an exact name to verify or switch profiles.',
-                           9, MUTED, PANEL, justify='left').pack(anchor='w', pady=(0, 8))
-                self.button(card, 'How to find my token', lambda: webbrowser.open(
-                    'https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/')).pack(anchor='w')
+
+        media = tk.Frame(columns, bg=PANEL, padx=20, pady=18)
+        media.grid(row=0, column=0, sticky='nsew')
+        heading = tk.Frame(media, bg=PANEL)
+        heading.pack(fill='x')
+        self.label(heading, 'Media server', 17, TEXT, PANEL, True).pack(side='left')
+        for text, value in (('Jellyfin', 'jellyfin'), ('Plex', 'plex')):
+            radio = ttk.Radiobutton(heading, text=text, value=value, variable=self.vars['media_server'],
+                                    command=self.show_media_fields)
+            radio.pack(side='right', padx=(12, 0))
+            self.inputs.append(radio)
+        self.label(media, 'Read watch history for one profile or user', 9, MUTED, PANEL).pack(anchor='w', pady=(4, 18))
+        self.plex_fields = tk.Frame(media, bg=PANEL)
+        fields(self.plex_fields, [('Server URL', 'plex_url', False), ('Personal token', 'plex_token', True),
+                                  ('Profile name (optional)', 'plex_user', False)])
+        self.label(self.plex_fields, 'Leave profile blank to use the token owner.\nEnter an exact name to verify or switch profiles.',
+                   9, MUTED, PANEL, justify='left').pack(anchor='w', pady=(0, 8))
+        self.button(self.plex_fields, 'How to find my token', lambda: webbrowser.open(
+            'https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/')).pack(anchor='w')
+        self.jf_fields = tk.Frame(media, bg=PANEL)
+        fields(self.jf_fields, [('Server URL', 'jf_url', False), ('User name', 'jf_user', False),
+                                ('API key', 'jf_api_key', True), ('Password (only without API key)', 'jf_password', True)])
+        self.label(self.jf_fields, 'Admins create API keys in Dashboard > API Keys. Other users enter a password.',
+                   9, MUTED, PANEL, justify='left').pack(anchor='w')
+        self.show_media_fields()
+
+        qb = tk.Frame(columns, bg=PANEL, padx=20, pady=18)
+        qb.grid(row=0, column=1, sticky='nsew', padx=(14, 0))
+        for i in (0, 1):
+            columns.columnconfigure(i, weight=1, uniform='connections')
+        self.label(qb, 'qBittorrent', 17, TEXT, PANEL, True).pack(anchor='w')
+        self.label(qb, 'Add the tag to matching video torrents', 9, MUTED, PANEL).pack(anchor='w', pady=(4, 18))
+        fields(qb, [('Web UI URL', 'qb_url', False), ('Web UI username', 'qb_username', False),
+                    ('Web UI password', 'qb_password', True), ('Existing tag', 'tag', False)])
         options = tk.Frame(parent, bg=PANEL, padx=18, pady=12)
         options.pack(fill='x', pady=(16, 0))
-        ttk.Checkbutton(options, text='Show token and password', variable=self.show_secrets,
+        ttk.Checkbutton(options, text='Show tokens and passwords', variable=self.show_secrets,
             command=lambda: [entry.configure(show='' if self.show_secrets.get() else '*') for entry in self.secret_entries]).pack(anchor='w')
         self.remember_check = ttk.Checkbutton(options, text='Remember credentials on this Windows account (encrypted)', variable=self.vars['remember'])
         self.remember_check.pack(anchor='w', pady=(5, 0))
@@ -300,20 +324,22 @@ class App(tk.Tk):
 
     def _help(self, parent):
         body = (
-            '1  CONNECT\nEnter your Plex URL and personal token, then your qBittorrent Web UI details. '
+            '1  CONNECT\nChoose Plex or Jellyfin. For Plex enter the server URL and personal token; for Jellyfin enter '
+            'the server URL, your user name and an API key or password. Then enter your qBittorrent Web UI details. '
             'Create your chosen tag in qBittorrent before testing the connection.\n\n'
             '2  DRY RUN\nReads your watched state and compares full file paths. No tags are changed. '
             'Review Ready, Unwatched and Unmatched rows. Non-video torrents are excluded.\n\n'
             '3  APPLY TAGS\nChoose all ready torrents or selected ready torrents. The app rechecks '
-            'your Plex watched state and qBittorrent file paths, then adds and verifies the tag.\n\n'
-            'HOW MATCHING WORKS\nA movie or single episode must be marked watched in Plex. '
+            'your media server watched state and qBittorrent file paths, then adds and verifies the tag.\n\n'
+            'HOW MATCHING WORKS\nA movie or single episode must be marked watched (played) in Plex or Jellyfin. '
             'Season and series packs require every video file in that torrent to be watched. '
             'All episode records sharing the same file must be watched. Partial viewing is not enough.\n\n'
-            'PATHS AND FILES\nPlex and qBittorrent must report identical Windows paths. Samples, subtitles '
+            'PATHS AND FILES\nThe media server and qBittorrent must report identical Windows paths. A Jellyfin server '
+            'running in Docker or Linux reports paths such as /media/... that will not match. Samples, subtitles '
             'and NFO files are ignored. RAR and ISO contents are not inspected. Bonus videos absent from '
-            'Plex prevent the torrent from being marked ready. Downloads must be complete.\n\n'
+            'the media server prevent the torrent from being marked ready. Downloads must be complete.\n\n'
             'YOUR DATA\nNo files or torrents are deleted, and tags are never removed. The app does not '
-            'change Plex watched state. A later change to unwatched will not remove an existing tag. '
+            'change watched state on the media server. A later change to unwatched will not remove an existing tag. '
             'Credentials are optional to remember and are encrypted with Windows DPAPI for your account. '
             'Plex profile verification requires access to plex.tv.\n\n'
             'AUTOMATION\nAuto sync is off at startup. When enabled, each interval performs a dry scan and '
@@ -344,13 +370,26 @@ class App(tk.Tk):
         self.log.see('end')
         self.log.configure(state='disabled')
 
+    def show_media_fields(self):
+        jellyfin = self.vars['media_server'].get() == 'jellyfin'
+        (self.plex_fields if jellyfin else self.jf_fields).pack_forget()
+        (self.jf_fields if jellyfin else self.plex_fields).pack(fill='x')
+
     def config(self):
         values = {k: v.get() for k, v in self.vars.items()}
-        values['plex_url'] = clean_url(values['plex_url'])
+        if values['media_server'] == 'jellyfin':
+            values['jf_url'] = clean_url(values['jf_url'])
+            if not values['jf_user'].strip():
+                raise ValueError('Enter your Jellyfin user name in Connections.')
+            if not values['jf_api_key'].strip() and not values['jf_password']:
+                raise ValueError('Enter a Jellyfin API key, or your Jellyfin password, in Connections.')
+        else:
+            values['media_server'] = 'plex'
+            values['plex_url'] = clean_url(values['plex_url'])
+            if not values['plex_token'].strip():
+                raise ValueError('Enter your Plex token in Connections.')
         values['qb_url'] = clean_url(values['qb_url'])
         values['tag'] = values['tag'].strip()
-        if not values['plex_token'].strip():
-            raise ValueError('Enter your Plex token in Connections.')
         if not values['tag'] or ',' in values['tag']:
             raise ValueError('Use one existing tag without commas.')
         return values
@@ -397,7 +436,10 @@ class App(tk.Tk):
                 raise ValueError('The settings file must contain a JSON object.')
             for key in self.vars:
                 if key not in ('remember', 'interval') and isinstance(data.get(key), str):
+                    if key == 'media_server' and data[key] not in ('plex', 'jellyfin'):
+                        continue
                     self.vars[key].set(data[key])
+            self.show_media_fields()
             self.append_log('Imported connection details into memory. Save Settings to remember them.')
             self.connection_state.set('NOT CONNECTED')
         except Exception:
@@ -481,7 +523,8 @@ class App(tk.Tk):
                 if kind == 'log':
                     self.append_log(data)
                 elif kind == 'profile':
-                    self.current_profile.set('Plex profile: ' + data)
+                    self.current_profile.set(('Jellyfin user: ' if self.vars['media_server'].get() == 'jellyfin'
+                                              else 'Plex profile: ') + data)
                     self.connection_state.set('CONNECTED')
                 elif kind == 'phase':
                     self.phase.set(data)

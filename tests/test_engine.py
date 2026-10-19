@@ -40,6 +40,11 @@ def config():
     return dict(settings.DEFAULTS, plex_token='fake-token', qb_username='test', qb_password='fake-password')
 
 
+def jf_config(**kw):
+    return dict(config(), **dict(dict(media_server='jellyfin', jf_url='http://localhost:8096', jf_user='Viewer',
+                                      jf_api_key='fake-key'), **kw))
+
+
 class MatchTests(unittest.TestCase):
     def setUp(self):
         self.t = {'save_path': 'M:/Media', 'progress':1}
@@ -118,6 +123,49 @@ class ApiTests(unittest.TestCase):
             e=engine.SyncEngine(dict(config(),plex_user='Viewer'))
             self.assertEqual(e.connect_plex(),'Viewer');self.assertEqual(e.plex,'switched-server')
             with self.assertRaises(ValueError):engine.SyncEngine(dict(config(),plex_user='Other')).connect_plex()
+    def test_jellyfin_api_key_finds_exact_user(self):
+        session=Session([Response(data=[{'Name':'Owner','Id':'1'},{'Name':'Viewer','Id':'2'}])])
+        with patch.dict(sys.modules,{'requests':types.SimpleNamespace(Session=lambda:session)}):
+            e=engine.SyncEngine(jf_config())
+            self.assertEqual(e.connect_jellyfin(),'Viewer');self.assertEqual(e.jf_user_id,'2')
+            self.assertIn('Token="fake-key"',session.headers['Authorization'])
+        session=Session([Response(data=[{'Name':'Owner','Id':'1'}])])
+        with patch.dict(sys.modules,{'requests':types.SimpleNamespace(Session=lambda:session)}):
+            with self.assertRaises(ValueError):engine.SyncEngine(jf_config()).connect_jellyfin()
+    def test_jellyfin_password_login(self):
+        session=Session([Response(data={'AccessToken':'session-token','User':{'Name':'Viewer','Id':'2'}})])
+        with patch.dict(sys.modules,{'requests':types.SimpleNamespace(Session=lambda:session)}):
+            e=engine.SyncEngine(jf_config(jf_api_key='',jf_password='pw'))
+            self.assertEqual(e.connect_jellyfin(),'Viewer')
+            self.assertEqual(session.calls[0][1]['json'],{'Username':'Viewer','Pw':'pw'})
+            self.assertIn('Token="session-token"',session.headers['Authorization'])
+    def test_jellyfin_rejected_and_missing_credentials(self):
+        session=Session([Response(status=401)])
+        with patch.dict(sys.modules,{'requests':types.SimpleNamespace(Session=lambda:session)}):
+            with self.assertRaisesRegex(RuntimeError,'rejected'):engine.SyncEngine(jf_config()).connect_jellyfin()
+        with self.assertRaises(ValueError):engine.SyncEngine(jf_config(jf_api_key='')).connect_jellyfin()
+        with self.assertRaises(ValueError):engine.SyncEngine(jf_config(jf_user='')).connect_jellyfin()
+    def test_jellyfin_pagination_versions_and_played(self):
+        pages=[{'TotalRecordCount':3,'Items':[
+                   {'UserData':{'Played':True},'Path':'M:/a.mkv','MediaSources':[{'Path':'M:/a.mkv','Protocol':'File'},{'Path':'M:/a-4k.mkv','Protocol':'File'}]},
+                   {'UserData':{'Played':False},'Path':'M:/b.mkv'}]},
+               {'TotalRecordCount':3,'Items':[
+                   {'UserData':{'Played':True},'Path':'M:/c.strm','MediaSources':[{'Path':'http://x/c','Protocol':'Http'}]}]}]
+        session=Session([Response(data=p) for p in pages])
+        e=engine.SyncEngine(jf_config());e.jf=session;e.jf_url='http://jf';e.jf_user_id='2'
+        idx=e.scan_media()
+        self.assertEqual(idx[engine.norm('M:/a.mkv')],[True]);self.assertEqual(idx[engine.norm('M:/a-4k.mkv')],[True])
+        self.assertEqual(idx[engine.norm('M:/b.mkv')],[False]);self.assertEqual(idx[engine.norm('M:/c.strm')],[True])
+        self.assertEqual([c[1]['params']['StartIndex'] for c in session.calls],[0,2])
+        self.assertEqual(session.calls[0][1]['params']['userId'],'2')
+    def test_jellyfin_library_changed(self):
+        pages=[{'TotalRecordCount':2,'Items':[{'UserData':{'Played':True},'Path':'M:/a.mkv'}]},
+               {'TotalRecordCount':3,'Items':[{'UserData':{'Played':True},'Path':'M:/b.mkv'}]}]
+        e=engine.SyncEngine(jf_config());e.jf=Session([Response(data=p) for p in pages]);e.jf_url='http://jf';e.jf_user_id='2'
+        with self.assertRaisesRegex(RuntimeError,'changed'):e.scan_jellyfin()
+    def test_plex_remains_default(self):
+        self.assertEqual(engine.SyncEngine(config()).server,'plex')
+        self.assertEqual(engine.SyncEngine(jf_config()).server,'jellyfin')
     def test_nonvideo_excluded_even_if_tagged(self):
         e=engine.SyncEngine(config());e.connect=lambda:None;e.scan_plex=lambda:{}
         e.request=lambda endpoint,params=None:Response(data=([{'hash':'abc','name':'Book','tags':'Watched','save_path':'M:/','progress':1}] if endpoint=='torrents/info' else [{'name':'book.pdf'}]))
@@ -163,12 +211,18 @@ class StorageTests(unittest.TestCase):
             text=(Path(d)/'settings.json').read_text()
             self.assertNotIn('fake-token',text);self.assertNotIn('fake-password',text)
             self.assertEqual(settings.load()['plex_token'],'')
+            settings.save(jf_config(jf_password='fake-jf-password'))
+            text=(Path(d)/'settings.json').read_text()
+            self.assertNotIn('fake-key',text);self.assertNotIn('fake-jf-password',text)
+            self.assertEqual(settings.load()['media_server'],'jellyfin')
     def test_encrypted_round_trip_contract(self):
         def fake_protect(data,decrypt=False):return data[::-1]
         with tempfile.TemporaryDirectory() as d,patch.object(settings,'APP_DIR',Path(d)),patch.object(settings,'protect',fake_protect):
             settings.save(dict(config(),remember=True))
             self.assertNotIn('fake-token',(Path(d)/'settings.json').read_text())
             self.assertEqual(settings.load()['plex_token'],'fake-token')
+            settings.save(dict(jf_config(),remember=True))
+            self.assertEqual(settings.load()['jf_api_key'],'fake-key')
             settings.save(dict(config(),remember=False))
             self.assertNotIn('protected_credentials',(Path(d)/'settings.json').read_text())
 

@@ -2,7 +2,7 @@
 
 [עברית](README.he.md) | English
 
-A Windows desktop GUI for adding a qBittorrent tag based on one Plex user's watched state.
+A Windows desktop GUI for adding a qBittorrent tag based on one Plex or Jellyfin user's watched state.
 
 ## Screenshots
 
@@ -42,7 +42,8 @@ the OS where they are run. The EXE is unsigned.
 - Background workers, progress, safe cancellation, filters, search and per-torrent details.
 - CSV export and automatic reports, excluding non-video torrents.
 - Exact file matching, including season packs and multiple episodes in one file.
-- Profile verification and support for qBittorrent's empty HTTP 200/204 login replies.
+- Plex and Jellyfin media servers, chosen in Connections.
+- Profile or user verification and support for qBittorrent's empty HTTP 200/204 login replies.
 - Optional Windows DPAPI credential storage. No personal account is bundled.
 - Optional in-app auto sync; off at every startup, errors stop automatic runs.
 - Import existing `config.json` from the earlier command-line version.
@@ -50,8 +51,8 @@ the OS where they are run. The EXE is unsigned.
 
 ## Matching rules
 
-Plex and qBittorrent must report identical Windows paths. Every non-sample video in
-a torrent must map to watched Plex records, and downloads must be complete. Missing
+The media server (Plex or Jellyfin) and qBittorrent must report identical Windows paths.
+Every non-sample video in a torrent must map to watched (played) media server records, and downloads must be complete. Missing
 videos and bonus clips block tagging. Subtitles and non-video files are ignored.
 The app adds one existing tag, and does not delete anything or remove existing tags.
 
@@ -61,7 +62,7 @@ The app adds one existing tag, and does not delete anything or remove existing t
 
 The test suite uses fake APIs to cover matching, pagination, profile selection,
 new/old login responses, error handling, report filtering, cancellation and add-only
-tag updates and clipboard editing with Hebrew Windows layouts. All 34 tests pass
+tag updates, Jellyfin login and library paging, and clipboard editing with Hebrew Windows layouts. All 40 tests pass
 without live server access. Windows EXE packaging, native DPAPI
 encryption and native GUI appearance require verification on Windows.
 
@@ -70,11 +71,12 @@ Read `README_USER.txt` for complete behavior and setup instructions.
 ## Connection setup
 
 Enable qBittorrent's Web UI and create your desired tag, usually `Watched`.
-In **Connections**, enter your Plex server URL and personal token, plus the
+In **Connections**, choose **Plex** or **Jellyfin** and enter its details, plus the
 qBittorrent Web UI URL, username and password. Example local addresses:
 
 ```text
 Plex:        http://localhost:32400
+Jellyfin:    http://localhost:8096
 qBittorrent: http://localhost:8080
 ```
 
@@ -82,6 +84,20 @@ Replace `localhost` if the services run on another machine. Leave **Profile name
 blank to use the token's account, or enter an exact profile name for verification
 or switching. The app does not combine different users' watch histories.
 See [Plex's official token instructions](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
+
+### Jellyfin
+
+Enter the server URL and your exact Jellyfin user name. Then either:
+
+- enter an **API key**. A Jellyfin administrator creates one in **Dashboard > API Keys**; or
+- leave the API key blank and enter that user's **password**.
+
+Only that user's played state is read. Jellyfin counts an item as played after it is
+watched nearly to the end, or when it is marked played manually.
+
+Jellyfin often runs in Docker or on Linux and then reports paths such as
+`/media/movies/...`. Those do not match the Windows paths in qBittorrent, so every
+video shows as **Unmatched**. Both services must report the same Windows paths.
 
 ## Results and daily use
 
@@ -94,7 +110,7 @@ Choose **All ready torrents** or select rows with Ctrl/Shift and choose
 | Ready | Every relevant video is matched, watched and fully downloaded. |
 | Tagged | The chosen tag is already present. |
 | Unwatched | At least one matched video is not marked watched. |
-| Unmatched | At least one video path is absent from Plex. |
+| Unmatched | At least one video path is absent from the media server. |
 | Incomplete | Watched videos are not fully downloaded yet. |
 | Error | An API request failed. Resolve it and scan again before tagging. |
 
@@ -106,7 +122,7 @@ Optional auto sync scans and applies tags to all ready torrents at your chosen
 interval, while the app is open. It starts disabled, ignores table selections and
 filters, and stops on errors. Stop takes effect after the current network request;
 tags already added remain. Existing tags are never removed when a title becomes
-unwatched in Plex.
+unwatched on the media server.
 
 ## Privacy
 
@@ -120,8 +136,8 @@ Settings and reports are stored outside the application folder:
 Credentials stay in memory unless **Remember credentials** is enabled. On Windows,
 remembered secrets are encrypted for the current user with DPAPI. Other connection
 settings are plain JSON. Disable the option and save to remove stored secrets.
-Personal Plex profile verification contacts `plex.tv`; service operations go to the
-URLs you enter. No application telemetry is implemented.
+Personal Plex profile verification contacts `plex.tv`; Jellyfin and other service
+operations go only to the URLs you enter. No application telemetry is implemented.
 
 Do not commit personal configs, reports or private screenshots. `.gitignore`
 excludes personal settings, reports, Python environments, caches and build outputs.
@@ -129,4 +145,4 @@ Share the generated ZIP, without your own account data.
 
 ## License
 
-[MIT](LICENSE). This project is independent of Plex and qBittorrent.
+[MIT](LICENSE). This project is independent of Plex, Jellyfin and qBittorrent.

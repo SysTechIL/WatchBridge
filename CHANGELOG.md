@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+- Add Jellyfin as an alternative to Plex. Choose the media server in Connections.
+- Jellyfin connects with an API key and an exact user name, or with that user's password.
+- Read Jellyfin played state and file paths for movies and episodes, including every version of an item.
+- Remember the Jellyfin API key and password with Windows DPAPI, like the Plex token.
+- Existing Plex settings keep working; Plex remains the default.
+
 ## 1.0.2
 
 - Handle clipboard shortcuts before ttk and widget bindings.

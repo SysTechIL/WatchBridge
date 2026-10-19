@@ -5,6 +5,8 @@ WatchBridge - ממשק גרפי באנגלית
 3. לחץ פעמיים על RUN.bat. בהפעלה הראשונה יותקנו התלויות.
 4. בחלון Connections בחר Import config.json וטען את קובץ ההגדרות הקיים שלך:
    T:\Downloads\PlexWatchedSync\config.json
+   לשימוש ב-Jellyfin במקום Plex: בחר Jellyfin בחלון Connections והזן כתובת שרת,
+   שם משתמש ו-API key (או סיסמה במקום המפתח).
 5. לחץ Test Connections, ולאחר מכן Dry Run בעמוד Scan & sync.
 6. אחרי בדיקת התוצאות, לחץ Apply Tags לריצה שמוסיפה תגיות.
 

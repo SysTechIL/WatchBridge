@@ -67,6 +67,12 @@ class SyncEngine:
         self.cancel = cancel or threading.Event()
         self.qb = None
         self.plex = None
+        self.jf = None
+        self.jf_user_id = None
+
+    @property
+    def server(self):
+        return 'jellyfin' if self.settings.get('media_server') == 'jellyfin' else 'plex'
 
     def checkpoint(self):
         if self.cancel.is_set():
@@ -139,9 +145,66 @@ class SyncEngine:
             raise RuntimeError('Plex connection or profile verification failed. '
                                'Check the server URL, personal token and access to plex.tv.') from None
 
+    def jf_request(self, path, params=None, data=None):
+        self.checkpoint()
+        try:
+            r = self.jf.request('POST' if data is not None else 'GET', self.jf_url + path,
+                                json=data, params=params, timeout=(10, 60))
+        except Exception:
+            raise RuntimeError('Jellyfin could not be reached. Check its server address and network access.') from None
+        if r.status_code in (401, 403):
+            raise RuntimeError('Jellyfin rejected the API key or login. Check your Jellyfin credentials.')
+        if not r.ok:
+            raise RuntimeError('Jellyfin API returned HTTP ' + str(r.status_code) + '. Check the server address.')
+        try:
+            return r.json()
+        except Exception:
+            raise RuntimeError('The address did not return valid Jellyfin API data.') from None
+
+    def jf_auth(self, token=None):
+        value = 'MediaBrowser Client="WatchBridge", Device="Windows", DeviceId="watchbridge", Version="1.1.0"'
+        self.jf.headers['Authorization'] = value + (', Token="' + token + '"' if token else '')
+
+    def connect_jellyfin(self):
+        import requests
+        self.checkpoint()
+        self.jf_url = clean_url(self.settings.get('jf_url', ''))
+        key = self.settings.get('jf_api_key', '').strip()
+        password = self.settings.get('jf_password', '')
+        wanted = self.settings.get('jf_user', '').strip()
+        if not wanted:
+            raise ValueError('Enter your Jellyfin user name in Connections.')
+        if not key and not password:
+            raise ValueError('Enter a Jellyfin API key, or your Jellyfin password, in Connections.')
+        self.jf = requests.Session()
+        if key:
+            self.jf_auth(key)
+            users = self.jf_request('/Users')
+            if not isinstance(users, list):
+                raise RuntimeError('This address does not appear to be a Jellyfin server.')
+            matches = [u for u in users if isinstance(u, dict)
+                       and str(u.get('Name', '')).strip().casefold() == wanted.casefold()]
+            if len(matches) != 1:
+                raise ValueError('The requested Jellyfin user could not be verified. Use the exact user name.')
+            user = matches[0]
+        else:
+            self.jf_auth()
+            login = self.jf_request('/Users/AuthenticateByName', data={'Username': wanted, 'Pw': password})
+            if not isinstance(login, dict) or not login.get('AccessToken') or not isinstance(login.get('User'), dict):
+                raise RuntimeError('This address does not appear to be a Jellyfin server.')
+            self.jf_auth(login['AccessToken'])
+            user = login['User']
+        if not user.get('Id'):
+            raise RuntimeError('Jellyfin did not return a user id.')
+        self.jf_user_id = user['Id']
+        title = str(user.get('Name') or wanted)
+        self.emit('profile', title)
+        self.emit('log', 'Jellyfin user verified: ' + title)
+        return title
+
     def connect(self):
         version, tags = self.connect_qb()
-        profile = self.connect_plex()
+        profile = self.connect_jellyfin() if self.server == 'jellyfin' else self.connect_plex()
         tag = self.settings.get('tag', 'Watched').strip()
         if not tag or ',' in tag:
             raise ValueError('Enter one tag name without commas.')
@@ -184,9 +247,46 @@ class SyncEngine:
         self.emit('log', 'Indexed ' + format(len(index), ',') + ' Plex file paths.')
         return index
 
+    def scan_jellyfin(self):
+        index = defaultdict(list)
+        self.emit('phase', 'Reading Jellyfin library')
+        offset, expected = 0, None
+        while True:
+            data = self.jf_request('/Items', params={
+                'userId': self.jf_user_id, 'Recursive': 'true', 'IncludeItemTypes': 'Movie,Episode',
+                'Fields': 'Path,MediaSources', 'EnableUserData': 'true', 'SortBy': 'SortName',
+                'StartIndex': offset, 'Limit': 500})
+            if not isinstance(data, dict) or not isinstance(data.get('Items'), list):
+                raise RuntimeError('Jellyfin returned an unexpected library response. No tags changed.')
+            items = data['Items']
+            total = int(data.get('TotalRecordCount', len(items)))
+            if expected is None:
+                expected = total
+            if total != expected or (not items and offset < total):
+                raise RuntimeError('Jellyfin library changed or returned an incomplete page. Please scan again.')
+            for item in items:
+                watched = bool((item.get('UserData') or {}).get('Played'))
+                # Each version of an item has its own file; strm and remote sources are not files.
+                paths = {s['Path'] for s in item.get('MediaSources') or []
+                         if s.get('Path') and s.get('Protocol', 'File') == 'File'}
+                if not paths and item.get('Path'):
+                    paths = {item['Path']}
+                for path in paths:
+                    index[norm(path)].append(watched)
+            offset += len(items)
+            if offset >= total:
+                break
+        if not index:
+            raise RuntimeError('Jellyfin returned no movie or episode file paths. No tags changed.')
+        self.emit('log', 'Indexed ' + format(len(index), ',') + ' Jellyfin file paths.')
+        return index
+
+    def scan_media(self):
+        return self.scan_jellyfin() if self.server == 'jellyfin' else self.scan_plex()
+
     def scan(self):
         self.connect()
-        index = self.scan_plex()
+        index = self.scan_media()
         torrents = self.request('torrents/info').json()
         rows, excluded = [], 0
         for i, torrent in enumerate(torrents, 1):
@@ -224,7 +324,7 @@ class SyncEngine:
         if not ready:
             return 0
         self.connect()
-        index = self.scan_plex()
+        index = self.scan_media()
         added = 0
         for i, row in enumerate(ready, 1):
             self.checkpoint()
@@ -252,8 +352,9 @@ class SyncEngine:
         return added
 
     def close(self):
-        if self.qb:
-            self.qb.close()
+        for session in (self.qb, self.jf):
+            if session:
+                session.close()
 
 
 FIELDS = ['status', 'torrent', 'hash', 'watched_files', 'video_files', 'unmatched_paths', 'error']

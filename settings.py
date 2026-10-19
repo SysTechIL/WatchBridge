@@ -8,9 +8,11 @@ from pathlib import Path
 import sys
 
 APP_DIR = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / '.local' / 'share'))) / 'WatchBridge'
-DEFAULTS = {'plex_url': 'http://localhost:32400', 'plex_token': '', 'plex_user': '',
+DEFAULTS = {'media_server': 'plex', 'plex_url': 'http://localhost:32400', 'plex_token': '', 'plex_user': '',
+            'jf_url': 'http://localhost:8096', 'jf_api_key': '', 'jf_user': '', 'jf_password': '',
             'qb_url': 'http://localhost:8080', 'qb_username': '', 'qb_password': '',
             'tag': 'Watched', 'remember': False, 'interval': '10'}
+SECRETS = ('plex_token', 'jf_api_key', 'jf_password', 'qb_password')
 
 
 def protect(data, decrypt=False):
@@ -44,9 +46,9 @@ def protect(data, decrypt=False):
 
 
 def save(values):
-    data = {k: values.get(k, v) for k, v in DEFAULTS.items() if k not in ('plex_token', 'qb_password')}
+    data = {k: values.get(k, v) for k, v in DEFAULTS.items() if k not in SECRETS}
     if values.get('remember'):
-        secret = json.dumps({k: values.get(k, '') for k in ('plex_token', 'qb_password')}).encode()
+        secret = json.dumps({k: values.get(k, '') for k in SECRETS}).encode()
         data['protected_credentials'] = base64.b64encode(protect(secret)).decode('ascii')
     APP_DIR.mkdir(parents=True, exist_ok=True)
     temp = APP_DIR / 'settings.tmp'
@@ -60,8 +62,8 @@ def load():
     if not path.exists():
         return values
     data = json.loads(path.read_text(encoding='utf-8-sig'))
-    values.update({k: data[k] for k in DEFAULTS if k in data and k not in ('plex_token', 'qb_password')})
+    values.update({k: data[k] for k in DEFAULTS if k in data and k not in SECRETS})
     if data.get('protected_credentials'):
         secret = json.loads(protect(base64.b64decode(data['protected_credentials']), decrypt=True))
-        values.update({k: secret.get(k, '') for k in ('plex_token', 'qb_password')})
+        values.update({k: secret.get(k, '') for k in SECRETS})
     return values

@@ -10,6 +10,12 @@ A Windows desktop GUI for adding a qBittorrent tag based on one Plex or Jellyfin
 
 ![WatchBridge scan results and status filter](docs/images/scan-and-sync-redacted.png)
 
+### Connections: Plex or Jellyfin
+
+| Plex | Jellyfin |
+| --- | --- |
+| ![Connections page with Plex selected](docs/images/connections-plex.png) | ![Connections page with Jellyfin selected](docs/images/connections-jellyfin.png) |
+
 <details>
 <summary>Activity and help</summary>
 

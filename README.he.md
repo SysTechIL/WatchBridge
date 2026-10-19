@@ -13,6 +13,12 @@ Jellyfin אחד לתגיות ב-qBittorrent. ההתאמה מתבצעת לפי ה
 
 ![מסך הסריקה עם תוצאות וסינון לפי מצב](docs/images/scan-and-sync-redacted.png)
 
+### חיבורים: Plex או Jellyfin
+
+| Plex | Jellyfin |
+| --- | --- |
+| ![עמוד החיבורים כאשר Plex נבחר](docs/images/connections-plex.png) | ![עמוד החיבורים כאשר Jellyfin נבחר](docs/images/connections-jellyfin.png) |
+
 <details>
 <summary>יומן פעילות ועזרה</summary>
 

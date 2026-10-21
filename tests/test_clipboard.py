@@ -50,7 +50,9 @@ class ClipboardTests(unittest.TestCase):
     def test_altgr_does_not_trigger_shortcut(self):
         e=Entry(clip='paste')
         event=types.SimpleNamespace(widget=e,state=4|8,keycode=86,keysym='v')
-        self.assertIsNone(clipboard.shortcut(event));self.assertEqual(e.value,'')
+        # AltGr is reported by Windows as Ctrl+Alt held together.
+        with patch.object(clipboard,'windows_modifiers',return_value=(True,True)):
+            self.assertIsNone(clipboard.shortcut(event));self.assertEqual(e.value,'')
     def test_no_selection_copy_is_safe(self):
         e=Entry('text',clip='keep')
         clipboard.edit(e,'copy');self.assertEqual(e.clip,'keep')

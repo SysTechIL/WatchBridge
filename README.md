@@ -2,13 +2,22 @@
 
 [עברית](README.he.md) | English
 
-A Windows desktop GUI for adding a qBittorrent tag based on one Plex or Jellyfin user's watched state.
+A Windows desktop GUI and command line for adding a qBittorrent tag based on one Plex or Jellyfin
+user's watched state. It can run on demand, on a background schedule, or in real time.
 
 ## Screenshots
 
+All screenshots use demo data.
+
 ### Scan, results and filtering
 
-![WatchBridge scan results and status filter](docs/images/scan-and-sync-redacted.png)
+![WatchBridge scan results with demo torrents](docs/images/scan-and-sync.png)
+
+### Background schedule
+
+| Every X minutes | Real time |
+| --- | --- |
+| ![Schedule page set to run every 30 minutes and at sign-in](docs/images/schedule.png) | ![Schedule page in real-time mode](docs/images/schedule-realtime.png) |
 
 ### Connections: Plex or Jellyfin
 
@@ -38,7 +47,8 @@ The interface is entirely in English.
 ## Build for sharing
 
 On Windows, double-click `BUILD_EXE.bat`. The output is `dist/WatchBridge-Windows.zip`,
-containing a self-contained `WatchBridge.exe` and user instructions. Share that ZIP.
+containing a self-contained `WatchBridge.exe` (window and background runs), `WatchBridgeCLI.exe`
+(command line) and user instructions. Share that ZIP.
 The source package does not contain a prebuilt Windows EXE. PyInstaller builds target
 the OS where they are run. The EXE is unsigned.
 
@@ -52,6 +62,9 @@ the OS where they are run. The EXE is unsigned.
 - Profile or user verification and support for qBittorrent's empty HTTP 200/204 login replies.
 - Optional Windows DPAPI credential storage. No personal account is bundled.
 - Optional in-app auto sync; off at every startup, errors stop automatic runs.
+- Background schedule with the window closed: every X minutes, daily or weekly at set times,
+  at Windows sign-in, or real time on Plex/Jellyfin playback and watched-state events.
+- Full command line (`WatchBridgeCLI`) with every option from the window, for scripts and terminals.
 - Import existing `config.json` from the earlier command-line version.
 - Right-click Cut/Copy/Paste/Select All and keyboard shortcuts, including Hebrew Windows keyboard layouts.
 
@@ -68,9 +81,11 @@ The app adds one existing tag, and does not delete anything or remove existing t
 
 The test suite uses fake APIs to cover matching, pagination, profile selection,
 new/old login responses, error handling, report filtering, cancellation and add-only
-tag updates, Jellyfin login and library paging, and clipboard editing with Hebrew Windows layouts. All 40 tests pass
-without live server access. Windows EXE packaging, native DPAPI
-encryption and native GUI appearance require verification on Windows.
+tag updates, Jellyfin login and library paging, and clipboard editing with Hebrew Windows layouts.
+It also covers schedule parsing, Task Scheduler XML, the run lock, failure pause and resume,
+real-time event handling, the agent loop and every command-line command. All 80 tests pass
+without live server access. Native GUI appearance and live Plex events require verification on Windows
+with real servers.
 
 Read `README_USER.txt` for complete behavior and setup instructions.
 
@@ -130,6 +145,66 @@ filters, and stops on errors. Stop takes effect after the current network reques
 tags already added remain. Existing tags are never removed when a title becomes
 unwatched on the media server.
 
+## Background schedule
+
+The **Schedule** page runs WatchBridge with the window closed, while you are signed in to Windows.
+It registers one task for your Windows account in Windows Task Scheduler. It does not need
+administrator rights, a Windows service, or a stored Windows password.
+
+| Mode | Runs |
+| --- | --- |
+| Every X minutes | Every 1 minute to 31 days, for example every 30 minutes. |
+| Daily at set times | At one or more times each day, for example `03:00, 15:30`. |
+| Weekly on set days | On chosen days at chosen times, for example Sun to Thu at 22:30. |
+| At Windows sign-in | Once each time you sign in. |
+| Real time | Listens for Plex or Jellyfin events and syncs shortly after playback stops or watched state changes. |
+
+Interval, daily and weekly modes can also run at sign-in. Real time starts at sign-in, waits a
+few seconds after the last event (30 by default), and runs an optional full check every N
+minutes in case an event is missed. Plex events need a token from the server owner. Jellyfin
+events use the user's password or an API key. If events are unavailable, the full check still runs.
+
+Every background run scans first. It tags all ready torrents only when the scan has no errors.
+Runs never overlap, including with the window. After a set number of consecutive failures
+(5 by default) background runs pause until you click **Resume**. Background runs need
+**Remember credentials**. **Run Now** starts a run immediately, and **Open Log** shows background
+activity. If you move WatchBridge to another folder, click **Save Schedule** again.
+
+## Command line
+
+Every option in the window is also available from `WatchBridgeCLI.exe`, or from
+`WatchBridgeCLI.bat` in the source package. Run `WatchBridgeCLI --help` or
+`WatchBridgeCLI <command> --help` for details.
+
+```text
+WatchBridgeCLI test                                    Test Connections
+WatchBridgeCLI scan [--status ready,unmatched] [--search TEXT] [--details] [--json] [--csv FILE]
+WatchBridgeCLI apply [--name TEXT] [--hash HASH]       Apply Tags (all ready, or a selection)
+WatchBridgeCLI sync                                    Scan, then tag all ready torrents
+WatchBridgeCLI auto --interval 15                      Auto sync while the command runs
+WatchBridgeCLI config show | set | import FILE | clear-credentials | path
+WatchBridgeCLI schedule set interval --every 30m --at-logon
+WatchBridgeCLI schedule set daily --at 03:00,15:30
+WatchBridgeCLI schedule set weekly --days sun-thu --at 22:30
+WatchBridgeCLI schedule set logon
+WatchBridgeCLI schedule set realtime --delay 30 --fallback 60
+WatchBridgeCLI schedule show | run | resume | off
+WatchBridgeCLI agent [--status | --run-now | --stop]   Real-time agent
+WatchBridgeCLI reports [--open] [--list N]
+WatchBridgeCLI logs [--tail N] [--follow] [--open]
+WatchBridgeCLI guide | gui | --version
+```
+
+Connection options override saved settings for one run: `--server plex|jellyfin`, `--plex-url`,
+`--plex-token`, `--plex-profile`, `--jf-url`, `--jf-user`, `--jf-api-key`, `--jf-password`,
+`--qb-url`, `--qb-user`, `--qb-password`, `--tag` and `--config FILE`. Add `--save`, with
+`--remember` or `--no-remember`, to store them. For secrets, pass `-` to be prompted, or set
+`WATCHBRIDGE_PLEX_TOKEN`, `WATCHBRIDGE_JF_API_KEY`, `WATCHBRIDGE_JF_PASSWORD` or
+`WATCHBRIDGE_QB_PASSWORD`, so that they do not appear in the process list.
+
+Exit codes: `0` success, `1` failure or scan errors, `2` invalid input, `3` another run in
+progress, `4` background runs paused, `130` stopped.
+
 ## Privacy
 
 Settings and reports are stored outside the application folder:
@@ -137,6 +212,8 @@ Settings and reports are stored outside the application folder:
 ```text
 %LOCALAPPDATA%\WatchBridge\settings.json
 %LOCALAPPDATA%\WatchBridge\reports\
+%LOCALAPPDATA%\WatchBridge\logs\
+%LOCALAPPDATA%\WatchBridge\schedule-state.json
 ```
 
 Credentials stay in memory unless **Remember credentials** is enabled. On Windows,

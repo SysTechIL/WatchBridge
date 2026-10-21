@@ -4,14 +4,23 @@
 
 עברית | [English](README.md)
 
-אפליקציית Windows עם ממשק באנגלית שמסנכרנת מצב צפייה מפרופיל Plex אחד או ממשתמש
+אפליקציית Windows עם ממשק באנגלית ושורת פקודה, שמסנכרנת מצב צפייה מפרופיל Plex אחד או ממשתמש
 Jellyfin אחד לתגיות ב-qBittorrent. ההתאמה מתבצעת לפי הנתיב המלא של קובצי הווידיאו.
+אפשר להריץ אותה ידנית, לפי תזמון ברקע או בזמן אמת.
 
 ## צילומי מסך
 
+כל צילומי המסך מציגים נתוני דוגמה.
+
 ### סריקה, תוצאות וסינון
 
-![מסך הסריקה עם תוצאות וסינון לפי מצב](docs/images/scan-and-sync-redacted.png)
+![מסך הסריקה עם טורנטים לדוגמה](docs/images/scan-and-sync.png)
+
+### תזמון ברקע
+
+| כל X דקות | זמן אמת |
+| --- | --- |
+| ![עמוד התזמון עם ריצה כל 30 דקות ובכניסה ל-Windows](docs/images/schedule.png) | ![עמוד התזמון במצב זמן אמת](docs/images/schedule-realtime.png) |
 
 ### חיבורים: Plex או Jellyfin
 
@@ -43,6 +52,9 @@ Jellyfin אחד לתגיות ב-qBittorrent. ההתאמה מתבצעת לפי ה
 - אימות פרופיל Plex או משתמש Jellyfin ובדיקת החיבורים לשני השירותים.
 - שמירת סודות אופציונלית בהצפנת Windows DPAPI.
 - ייבוא הגדרות מהסקריפט הקודם וסנכרון אוטומטי כשהאפליקציה פתוחה.
+- **תזמון ברקע** כשהחלון סגור: כל X דקות, כל יום או בימים נבחרים בשעות קבועות, בכניסה ל-Windows,
+  או **בזמן אמת** לפי אירועי צפייה מ-Plex או מ-Jellyfin.
+- **שורת פקודה מלאה** (`WatchBridgeCLI`) עם כל האפשרויות של החלון, לסקריפטים ולמסוף.
 - הדבקה והעתקה מתפריט לחיצה ימנית וקיצורי מקשים, כולל פריסת מקלדת עברית ב-Windows.
 
 האפליקציה מוסיפה תגיות בלבד. היא לא מוחקת קבצים או טורנטים, לא עוצרת הורדות,
@@ -141,6 +153,69 @@ Jellyfin שרץ ב-Docker או ב-Linux מדווח בדרך כלל נתיבים 
 ללא קשר לבחירה בטבלה, ומפסיקה במקרה של שגיאות. עצירה נכנסת לתוקף לאחר בקשת
 הרשת הנוכחית. תגיות שכבר נוספו נשארות ואפשר לבדוק אותן בסריקה נוספת.
 
+## תזמון ברקע
+
+עמוד **Schedule** מריץ את WatchBridge כשהחלון סגור, כל עוד אתה מחובר ל-Windows.
+האפליקציה רושמת משימה אחת עבור משתמש ה-Windows שלך ב-Task Scheduler (מתזמן המשימות של Windows).
+לא נדרשות הרשאות מנהל, Windows Service או שמירת סיסמת Windows.
+
+| מצב | מתי רץ |
+| --- | --- |
+| Every X minutes | כל דקה עד 31 יום, למשל כל 30 דקות. |
+| Daily at set times | בשעה אחת או יותר בכל יום, למשל `03:00, 15:30`. |
+| Weekly on set days | בימים ובשעות שנבחרו, למשל א'-ה' ב-22:30. |
+| At Windows sign-in | פעם אחת בכל כניסה ל-Windows. |
+| Real time | מאזין לאירועים מ-Plex או מ-Jellyfin ומסנכרן זמן קצר אחרי סיום צפייה או שינוי מצב צפייה. |
+
+במצבים Every X minutes, Daily ו-Weekly אפשר לסמן ריצה נוספת בכל כניסה ל-Windows.
+מצב Real time מתחיל בכניסה ל-Windows. הוא ממתין כמה שניות אחרי האירוע האחרון (30 כברירת מחדל),
+ומריץ גם בדיקה מלאה כל N דקות, למקרה שאירוע הוחמץ. ב-Plex האירועים דורשים טוקן של בעל השרת.
+ב-Jellyfin האירועים מתקבלים עם הסיסמה או ה-API key של המשתמש. אם האירועים לא זמינים, הבדיקה המלאה ממשיכה לרוץ.
+
+כל ריצה ברקע סורקת קודם. היא מוסיפה תגיות לכל הטורנטים המוכנים רק אם בסריקה לא היו שגיאות.
+ריצות לא חופפות, גם לא לפעולה בחלון. אחרי מספר כישלונות ברצף (5 כברירת מחדל) הריצות ברקע
+נעצרות עד שלוחצים **Resume**. ריצה ברקע דורשת **Remember credentials**.
+**Run Now** מפעיל ריצה מיד, ו-**Open Log** פותח את יומן הפעילות ברקע.
+אם מעבירים את WatchBridge לתיקייה אחרת, יש ללחוץ שוב **Save Schedule**.
+
+## שורת פקודה
+
+כל אפשרות שקיימת בחלון זמינה גם ב-`WatchBridgeCLI.exe`, או ב-`WatchBridgeCLI.bat` בחבילת הקוד.
+לפרטים: `WatchBridgeCLI --help` או `WatchBridgeCLI <command> --help`.
+
+<div dir="ltr" align="left">
+
+```text
+WatchBridgeCLI test                                    Test Connections
+WatchBridgeCLI scan [--status ready,unmatched] [--search TEXT] [--details] [--json] [--csv FILE]
+WatchBridgeCLI apply [--name TEXT] [--hash HASH]       Apply Tags (all ready, or a selection)
+WatchBridgeCLI sync                                    Scan, then tag all ready torrents
+WatchBridgeCLI auto --interval 15                      Auto sync while the command runs
+WatchBridgeCLI config show | set | import FILE | clear-credentials | path
+WatchBridgeCLI schedule set interval --every 30m --at-logon
+WatchBridgeCLI schedule set daily --at 03:00,15:30
+WatchBridgeCLI schedule set weekly --days sun-thu --at 22:30
+WatchBridgeCLI schedule set logon
+WatchBridgeCLI schedule set realtime --delay 30 --fallback 60
+WatchBridgeCLI schedule show | run | resume | off
+WatchBridgeCLI agent [--status | --run-now | --stop]   Real-time agent
+WatchBridgeCLI reports [--open] [--list N]
+WatchBridgeCLI logs [--tail N] [--follow] [--open]
+WatchBridgeCLI guide | gui | --version
+```
+
+</div>
+
+פרמטרי החיבור גוברים על ההגדרות השמורות בריצה אחת: `--server plex|jellyfin`, `--plex-url`,
+`--plex-token`, `--plex-profile`, `--jf-url`, `--jf-user`, `--jf-api-key`, `--jf-password`,
+`--qb-url`, `--qb-user`, `--qb-password`, `--tag` ו-`--config FILE`. לשמירה הוסף `--save`,
+יחד עם `--remember` או `--no-remember`. בסודות אפשר להעביר `-` כדי לקבל בקשה להקלדה, או להגדיר
+`WATCHBRIDGE_PLEX_TOKEN`, `WATCHBRIDGE_JF_API_KEY`, `WATCHBRIDGE_JF_PASSWORD` או `WATCHBRIDGE_QB_PASSWORD`.
+כך הסודות לא מופיעים ברשימת התהליכים.
+
+קודי יציאה: `0` הצלחה, `1` כישלון או שגיאות בסריקה, `2` קלט לא תקין, `3` ריצה אחרת פעילה,
+`4` הריצות ברקע מושהות, `130` נעצר.
+
 ## בניית EXE לשיתוף
 
 במחשב Windows הפעל:
@@ -163,7 +238,8 @@ dist/WatchBridge-Windows.zip
 
 </div>
 
-שתף את ה-ZIP הזה. הוא כולל `WatchBridge.exe` עצמאי והוראות באנגלית, והמקבלים
+שתף את ה-ZIP הזה. הוא כולל `WatchBridge.exe` עצמאי (החלון והריצות ברקע), `WatchBridgeCLI.exe`
+(שורת הפקודה) והוראות באנגלית, והמקבלים
 לא יצטרכו להתקין Python. כל משתמש מזין את פרטי החיבור שלו.
 המאגר מכיל קוד מקור, ללא EXE שכבר נבנה. הבנייה מתבצעת ב-Windows והקובץ אינו חתום.
 
@@ -176,6 +252,8 @@ dist/WatchBridge-Windows.zip
 ```text
 %LOCALAPPDATA%\WatchBridge\settings.json
 %LOCALAPPDATA%\WatchBridge\reports\
+%LOCALAPPDATA%\WatchBridge\logs\
+%LOCALAPPDATA%\WatchBridge\schedule-state.json
 ```
 
 </div>
@@ -200,10 +278,12 @@ py -3 watchbridge.py
 
 </div>
 
-40 בדיקות הלוגיקה משתמשות בנתוני API ובשדות קלט מדומים. הן מכסות התאמת נתיבים, חבילות
+80 בדיקות הלוגיקה משתמשות בנתוני API ובשדות קלט מדומים. הן מכסות התאמת נתיבים, חבילות
 עונות, פרקים באותו קובץ, עימוד תוצאות, פרופילים, התחברות ל-Jellyfin ול-qBittorrent, עצירה וסינון דוחות.
-נבדקים גם קיצורי ההדבקה בפריסת מקלדת עברית. בדיקת שמירת הסודות משתמשת בהצפנה מדומה. בדיקת DPAPI אמיתית, מראה החלון
-והרצת EXE דורשות בדיקה במחשב Windows.
+נבדקים גם קיצורי ההדבקה בפריסת מקלדת עברית. בדיקת שמירת הסודות משתמשת בהצפנה מדומה.
+בנוסף נבדקים פענוח התזמון, קובץ ה-XML ל-Task Scheduler, נעילת הריצה, השהיה וחידוש אחרי כישלונות,
+טיפול באירועי זמן אמת, לולאת הסוכן וכל פקודות שורת הפקודה. מראה החלון ואירועי Plex אמיתיים
+דורשים בדיקה במחשב Windows מול שרתים אמיתיים.
 
 הוראות נוספות באנגלית: [README_USER.txt](README_USER.txt).
 

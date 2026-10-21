@@ -11,8 +11,14 @@ APP_DIR = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / '.local' / 'shar
 DEFAULTS = {'media_server': 'plex', 'plex_url': 'http://localhost:32400', 'plex_token': '', 'plex_user': '',
             'jf_url': 'http://localhost:8096', 'jf_api_key': '', 'jf_user': '', 'jf_password': '',
             'qb_url': 'http://localhost:8080', 'qb_username': '', 'qb_password': '',
-            'tag': 'Watched', 'remember': False, 'interval': '10'}
+            'tag': 'Watched', 'remember': False, 'interval': '10',
+            'schedule_mode': 'off', 'schedule_every': '60', 'schedule_times': '03:00',
+            'schedule_days': 'Mon,Tue,Wed,Thu,Fri,Sat,Sun', 'schedule_at_logon': False,
+            'realtime_fallback': '60', 'realtime_delay': '30', 'max_failures': '5'}
 SECRETS = ('plex_token', 'jf_api_key', 'jf_password', 'qb_password')
+# Preferences that do not change which servers, accounts or tag a scan uses.
+LOCAL_KEYS = ('remember', 'interval', 'schedule_mode', 'schedule_every', 'schedule_times', 'schedule_days',
+              'schedule_at_logon', 'realtime_fallback', 'realtime_delay', 'max_failures')
 
 
 def protect(data, decrypt=False):

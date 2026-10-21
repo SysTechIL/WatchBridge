@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
+__version__ = '1.2.0'
 VIDEO = {'.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.mpg', '.mpeg',
          '.ts', '.m2ts', '.mts', '.webm', '.vob', '.flv', '.ogv', '.divx'}
 
@@ -25,6 +26,27 @@ def clean_url(value):
     if parts.scheme not in ('http', 'https') or not parts.netloc or parts.username:
         raise ValueError('Use a full http:// or https:// URL without embedded credentials.')
     return urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip('/'), '', ''))
+
+
+def checked_config(values):
+    """Validate connection settings shared by the window, command line and background runs."""
+    values = dict(values)
+    if values.get('media_server') == 'jellyfin':
+        values['jf_url'] = clean_url(values.get('jf_url', ''))
+        if not values.get('jf_user', '').strip():
+            raise ValueError('Enter your Jellyfin user name in Connections.')
+        if not values.get('jf_api_key', '').strip() and not values.get('jf_password'):
+            raise ValueError('Enter a Jellyfin API key, or your Jellyfin password, in Connections.')
+    else:
+        values['media_server'] = 'plex'
+        values['plex_url'] = clean_url(values.get('plex_url', ''))
+        if not values.get('plex_token', '').strip():
+            raise ValueError('Enter your Plex token in Connections.')
+    values['qb_url'] = clean_url(values.get('qb_url', ''))
+    values['tag'] = values.get('tag', '').strip()
+    if not values['tag'] or ',' in values['tag']:
+        raise ValueError('Use one existing tag without commas.')
+    return values
 
 
 def media_files(files):
@@ -69,6 +91,7 @@ class SyncEngine:
         self.plex = None
         self.jf = None
         self.jf_user_id = None
+        self.jf_token = None
 
     @property
     def server(self):
@@ -162,7 +185,9 @@ class SyncEngine:
             raise RuntimeError('The address did not return valid Jellyfin API data.') from None
 
     def jf_auth(self, token=None):
-        value = 'MediaBrowser Client="WatchBridge", Device="Windows", DeviceId="watchbridge", Version="1.1.0"'
+        value = ('MediaBrowser Client="WatchBridge", Device="Windows", DeviceId="watchbridge", Version="'
+                 + __version__ + '"')
+        self.jf_token = token
         self.jf.headers['Authorization'] = value + (', Token="' + token + '"' if token else '')
 
     def connect_jellyfin(self):

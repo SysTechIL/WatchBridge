@@ -10,7 +10,11 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import webbrowser
 
-from engine import SyncEngine, Cancelled, clean_url, public_error, write_report, report_name
+from engine import SyncEngine, Cancelled, __version__, checked_config, public_error, write_report, report_name
+import agent
+from helptext import GUIDE
+import runtime
+import scheduler
 import settings as storage
 from clipboard_actions import install as install_edit_menu
 
@@ -69,11 +73,12 @@ class App(tk.Tk):
         self.search.trace_add('write', lambda *_: self.refresh_table())
         self.filter.trace_add('write', lambda *_: self.refresh_table())
         for key, var in self.vars.items():
-            if key not in ('remember', 'interval'):
+            if key not in storage.LOCAL_KEYS:
                 var.trace_add('write', lambda *_: self.refresh_actions())
         self.protocol('WM_DELETE_WINDOW', self.on_close)
         self.after(80, self.drain)
         self.after(1000, self.auto_tick)
+        self.after(1500, self.schedule_tick)
         if self.error_on_load:
             self.after(300, lambda: messagebox.showwarning('Settings', self.error_on_load))
         configured = (values.get('jf_user') and (values.get('jf_api_key') or values.get('jf_password'))
@@ -130,7 +135,7 @@ class App(tk.Tk):
         self.label(sidebar, 'Plex / Jellyfin to qBittorrent', 10, MUTED, PANEL).pack(anchor='w', padx=25, pady=(4, 32))
         self.nav = {}
         self.pages = {}
-        for name in ('Scan & sync', 'Connections', 'Activity', 'Help'):
+        for name in ('Scan & sync', 'Connections', 'Schedule', 'Activity', 'Help'):
             b = self.button(sidebar, name, lambda n=name: self.show_page(n), color=PANEL, anchor='w')
             b.pack(fill='x', padx=12, pady=3)
             self.nav[name] = b
@@ -139,7 +144,7 @@ class App(tk.Tk):
         self.label(bottom, 'ADD TAGS ONLY', 9, TEAL, PANEL, True).pack(anchor='w')
         self.label(bottom, 'Your media stays where it is.\nNo deletion. No tag removal.', 9,
                    MUTED, PANEL, justify='left').pack(anchor='w', pady=(8, 14))
-        self.label(bottom, 'v1.1.0  /  Windows', 9, MUTED, PANEL).pack(anchor='w')
+        self.label(bottom, 'v' + __version__ + '  /  Windows', 9, MUTED, PANEL).pack(anchor='w')
         outer = tk.Frame(self, bg=BG)
         outer.pack(side='left', fill='both', expand=True, padx=28, pady=24)
         top = tk.Frame(outer, bg=BG)
@@ -153,6 +158,7 @@ class App(tk.Tk):
             self.pages[name] = tk.Frame(self.container, bg=BG)
         self._dashboard(self.pages['Scan & sync'])
         self._connections(self.pages['Connections'])
+        self._schedule(self.pages['Schedule'])
         self._activity(self.pages['Activity'])
         self._help(self.pages['Help'])
 
@@ -161,6 +167,9 @@ class App(tk.Tk):
             page.pack_forget()
         self.pages[name].pack(fill='both', expand=True)
         self.page_title.configure(text=name)
+        self.current_page = name
+        if name == 'Schedule':
+            self.refresh_schedule_status()
         for key, button in self.nav.items():
             button.configure(bg='#243451' if key == name else PANEL,
                              fg=TEXT if key == name else MUTED)
@@ -309,7 +318,190 @@ class App(tk.Tk):
         ttk.Combobox(row, textvariable=self.vars['interval'], state='readonly',
                      values=['5', '10', '15', '30', '60'], width=5).pack(side='left', padx=10)
         self.label(row, 'minutes. Each run checks watched state before adding tags.', 9, MUTED, PANEL).pack(side='left')
-        self.label(parent, 'Settings are saved per user. The app folder contains no personal configuration.', 9, MUTED).pack(anchor='w', pady=(14, 0))
+        self.label(parent, 'Settings are saved per user. The app folder contains no personal configuration. '
+                   'To run with this window closed, use Schedule.', 9, MUTED).pack(anchor='w', pady=(14, 0))
+
+    def _schedule(self, parent):
+        self.label(parent, 'Run WatchBridge in the background with this window closed, while you are signed in to Windows.',
+                   11, MUTED).pack(anchor='w', pady=(0, 18))
+        card = tk.Frame(parent, bg=PANEL, padx=20, pady=18)
+        card.pack(fill='x')
+        self.label(card, 'Background schedule', 17, TEXT, PANEL, True).pack(anchor='w')
+        self.label(card, 'Each run scans, then adds the tag to all ready torrents only when the scan has no errors. '
+                   'Uses Windows Task Scheduler; no administrator rights or Windows service.',
+                   9, MUTED, PANEL).pack(anchor='w', pady=(4, 16))
+        self.schedule_mode = tk.StringVar(value=scheduler.MODES.get(self.vars['schedule_mode'].get(), 'Off'))
+        self.day_vars = {}
+        try:
+            days = scheduler.parse_days(self.vars['schedule_days'].get())
+        except ValueError:
+            days = list(scheduler.DAYS)
+        self.schedule_rows = {}
+        # Rows for the chosen mode are shown inside this frame, above the summary line.
+        fields = tk.Frame(card, bg=PANEL)
+
+        def row(key, text):
+            frame = tk.Frame(card if key == 'mode' else fields, bg=PANEL)
+            self.label(frame, text, 10, MUTED, PANEL, width=16, anchor='w').pack(side='left')
+            self.schedule_rows[key] = frame
+            return frame
+
+        def entry(parent, var, width):
+            widget = ttk.Entry(parent, textvariable=var, width=width)
+            widget.pack(side='left')
+            install_edit_menu(widget)
+
+        mode_row = row('mode', 'When')
+        mode_row.pack(fill='x', pady=(0, 10))
+        ttk.Combobox(mode_row, textvariable=self.schedule_mode, values=list(scheduler.MODES.values()),
+                     state='readonly', width=24).pack(side='left')
+        fields.pack(fill='x')
+        every = row('interval', 'Run every')
+        ttk.Combobox(every, textvariable=self.vars['schedule_every'], width=8,
+                     values=['5', '10', '15', '30', '60', '120', '360', '720', '1440']).pack(side='left')
+        self.label(every, '  minutes. Any value from 1 minute to 31 days (44640).', 9, MUTED, PANEL).pack(side='left')
+        week = row('days', 'On days')
+        for day in scheduler.DAYS:
+            self.day_vars[day] = tk.BooleanVar(value=day in days)
+            ttk.Checkbutton(week, text=day, variable=self.day_vars[day]).pack(side='left', padx=(0, 6))
+        times = row('times', 'At')
+        entry(times, self.vars['schedule_times'], 22)
+        self.label(times, '  24-hour times, comma-separated, e.g. 03:00, 15:30', 9, MUTED, PANEL).pack(side='left')
+        delay = row('delay', 'Wait after event')
+        ttk.Combobox(delay, textvariable=self.vars['realtime_delay'], width=8,
+                     values=['10', '30', '60', '120', '300']).pack(side='left')
+        self.label(delay, '  seconds after playback stops or watched state changes on the media server.',
+                   9, MUTED, PANEL).pack(side='left')
+        fallback = row('fallback', 'Full check every')
+        ttk.Combobox(fallback, textvariable=self.vars['realtime_fallback'], width=8,
+                     values=['0', '15', '30', '60', '120', '360', '1440']).pack(side='left')
+        self.label(fallback, '  minutes, in case an event is missed. 0 = events only.', 9, MUTED, PANEL).pack(side='left')
+        logon = row('logon', '')
+        ttk.Checkbutton(logon, text='Also run when I sign in to Windows', variable=self.vars['schedule_at_logon']).pack(side='left')
+        failures = row('failures', 'Pause after')
+        ttk.Combobox(failures, textvariable=self.vars['max_failures'], width=8,
+                     values=['0', '1', '3', '5', '10']).pack(side='left')
+        self.label(failures, '  consecutive failed runs. 0 = never pause.', 9, MUTED, PANEL).pack(side='left')
+        self.schedule_summary = tk.StringVar()
+        self.label(card, size=10, color=TEAL, bg=PANEL, textvariable=self.schedule_summary,
+                   justify='left', wraplength=900).pack(anchor='w', pady=(6, 0))
+        self.schedule_note = self.label(card, 'Real time needs a Plex token from the server owner, or a Jellyfin user '
+                                        'password or API key. If events are unavailable, the full check still runs.',
+                                        9, MUTED, PANEL, justify='left')
+        self.schedule_mode.trace_add('write', lambda *_: self.show_schedule_fields())
+        for var in (self.vars['schedule_every'], self.vars['schedule_times'], self.vars['realtime_delay'],
+                    self.vars['realtime_fallback'], self.vars['schedule_at_logon'], *self.day_vars.values()):
+            var.trace_add('write', lambda *_: self.update_schedule_summary())
+        actions = tk.Frame(parent, bg=BG)
+        actions.pack(fill='x', pady=16)
+        self.schedule_button = self.button(actions, 'Save Schedule', self.save_schedule, BLUE)
+        self.schedule_button.pack(side='left')
+        self.button(actions, 'Run Now', self.schedule_run_now).pack(side='left', padx=8)
+        self.button(actions, 'Resume', self.schedule_resume).pack(side='left')
+        self.button(actions, 'Open Log', self.open_logs).pack(side='right')
+        self.button(actions, 'Refresh', self.refresh_schedule_status).pack(side='right', padx=8)
+        status = tk.Frame(parent, bg=PANEL, padx=18, pady=14)
+        status.pack(fill='x')
+        self.label(status, 'STATUS', 9, MUTED, PANEL, True).pack(anchor='w', pady=(0, 6))
+        self.schedule_status = tk.StringVar(value='Reading Task Scheduler...')
+        tk.Label(status, textvariable=self.schedule_status, bg=PANEL, fg=TEXT, justify='left', anchor='w',
+                 font=('Consolas', 10), wraplength=1000).pack(anchor='w')
+        self.label(parent, 'Saving the schedule also saves your connection settings, which must be remembered. '
+                   'Command line: WatchBridgeCLI schedule set interval --every 30m  |  schedule show  |  schedule off',
+                   9, MUTED, wraplength=1000, justify='left').pack(anchor='w', pady=(14, 0))
+        self.schedule_refreshing = False
+        self.show_schedule_fields()
+
+    def schedule_mode_key(self):
+        return next((k for k, v in scheduler.MODES.items() if v == self.schedule_mode.get()), 'off')
+
+    def show_schedule_fields(self):
+        mode = self.schedule_mode_key()
+        visible = {'off': [], 'interval': ['interval', 'logon', 'failures'], 'daily': ['times', 'logon', 'failures'],
+                   'weekly': ['days', 'times', 'logon', 'failures'], 'logon': ['failures'],
+                   'realtime': ['delay', 'fallback', 'failures']}[mode]
+        for key, frame in self.schedule_rows.items():
+            if key != 'mode':
+                frame.pack_forget()
+        self.schedule_note.pack_forget()
+        for key in visible:
+            self.schedule_rows[key].pack(fill='x', pady=(0, 10))
+        if mode == 'realtime':
+            self.schedule_note.pack(anchor='w', pady=(4, 0))
+        self.update_schedule_summary()
+
+    def schedule_values(self):
+        values = {k: v.get() for k, v in self.vars.items()}
+        values['schedule_mode'] = self.schedule_mode_key()
+        days = [d for d in scheduler.DAYS if self.day_vars[d].get()]
+        values['schedule_days'] = ','.join(days) if days or values['schedule_mode'] == 'weekly' else 'all'
+        return values
+
+    def update_schedule_summary(self):
+        if hasattr(self, 'schedule_note'):
+            try:
+                self.schedule_summary.set(scheduler.describe(self.schedule_values()))
+            except ValueError as exc:
+                self.schedule_summary.set(str(exc))
+
+    def save_schedule(self):
+        values = self.schedule_values()
+        if values['schedule_mode'] != 'off' and not values.get('remember'):
+            if not messagebox.askyesno('Remember credentials', 'Background runs need your connection credentials '
+                    'while this window is closed. Remember them, encrypted for this Windows user?'):
+                return
+            values['remember'] = True
+            self.vars['remember'].set(True)
+        self.schedule_button.configure(state='disabled')
+        self.schedule_status.set('Saving schedule...')
+
+        def worker():
+            try:
+                self.events.put(('schedule_saved', (agent.configure(values), values)))
+            except ValueError as exc:
+                self.events.put(('schedule_error', str(exc)))
+            except Exception as exc:
+                self.events.put(('schedule_error', public_error(exc)))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def schedule_run_now(self):
+        try:
+            self.append_log(agent.run_now())
+            self.after(2000, self.refresh_schedule_status)
+        except (ValueError, RuntimeError) as exc:
+            messagebox.showinfo('Schedule', str(exc))
+
+    def schedule_resume(self):
+        runtime.resume()
+        self.append_log('Background runs resumed.')
+        self.refresh_schedule_status()
+
+    def refresh_schedule_status(self):
+        if not hasattr(self, 'schedule_status') or self.schedule_refreshing:
+            return
+        self.schedule_refreshing = True
+        values = {k: v.get() for k, v in self.vars.items()}
+
+        def worker():
+            try:
+                text = '\n'.join(agent.status_lines(agent.status(values)))
+            except Exception as exc:
+                text = public_error(exc)
+            self.events.put(('schedule_status', text))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def schedule_tick(self):
+        if getattr(self, 'current_page', None) == 'Schedule':
+            self.refresh_schedule_status()
+        self.after(15000, self.schedule_tick)
+
+    def open_logs(self):
+        folder = runtime.LOG_FILE.parent
+        folder.mkdir(parents=True, exist_ok=True)
+        if sys.platform == 'win32':
+            os.startfile(str(folder))
+        else:
+            webbrowser.open(folder.as_uri())
 
     def _activity(self, parent):
         bar = tk.Frame(parent, bg=BG)
@@ -323,30 +515,7 @@ class App(tk.Tk):
         self.append_log('Welcome to WatchBridge. Dry Run reads data; Apply Tags adds tags.')
 
     def _help(self, parent):
-        body = (
-            '1  CONNECT\nChoose Plex or Jellyfin. For Plex enter the server URL and personal token; for Jellyfin enter '
-            'the server URL, your user name and an API key or password. Then enter your qBittorrent Web UI details. '
-            'Create your chosen tag in qBittorrent before testing the connection.\n\n'
-            '2  DRY RUN\nReads your watched state and compares full file paths. No tags are changed. '
-            'Review Ready, Unwatched and Unmatched rows. Non-video torrents are excluded.\n\n'
-            '3  APPLY TAGS\nChoose all ready torrents or selected ready torrents. The app rechecks '
-            'your media server watched state and qBittorrent file paths, then adds and verifies the tag.\n\n'
-            'HOW MATCHING WORKS\nA movie or single episode must be marked watched (played) in Plex or Jellyfin. '
-            'Season and series packs require every video file in that torrent to be watched. '
-            'All episode records sharing the same file must be watched. Partial viewing is not enough.\n\n'
-            'PATHS AND FILES\nThe media server and qBittorrent must report identical Windows paths. A Jellyfin server '
-            'running in Docker or Linux reports paths such as /media/... that will not match. Samples, subtitles '
-            'and NFO files are ignored. RAR and ISO contents are not inspected. Bonus videos absent from '
-            'the media server prevent the torrent from being marked ready. Downloads must be complete.\n\n'
-            'YOUR DATA\nNo files or torrents are deleted, and tags are never removed. The app does not '
-            'change watched state on the media server. A later change to unwatched will not remove an existing tag. '
-            'Credentials are optional to remember and are encrypted with Windows DPAPI for your account. '
-            'Plex profile verification requires access to plex.tv.\n\n'
-            'AUTOMATION\nAuto sync is off at startup. When enabled, each interval performs a dry scan and '
-            'then applies tags to all ready torrents. It only runs while this app is open. '
-            'Errors disable auto sync. Stop interrupts after the current network request finishes.\n\n'
-            'SHARING\nShare only the source ZIP or the built application folder. Do not include your '
-            'personal settings, imported config.json, reports or screenshots. Recipients enter their own details.')
+        body = GUIDE
         text = tk.Text(parent, bg=PANEL, fg=TEXT, relief='flat', padx=24, pady=20,
                        font=('Segoe UI', 11), wrap='word')
         text.pack(fill='both', expand=True)
@@ -376,23 +545,7 @@ class App(tk.Tk):
         (self.jf_fields if jellyfin else self.plex_fields).pack(fill='x')
 
     def config(self):
-        values = {k: v.get() for k, v in self.vars.items()}
-        if values['media_server'] == 'jellyfin':
-            values['jf_url'] = clean_url(values['jf_url'])
-            if not values['jf_user'].strip():
-                raise ValueError('Enter your Jellyfin user name in Connections.')
-            if not values['jf_api_key'].strip() and not values['jf_password']:
-                raise ValueError('Enter a Jellyfin API key, or your Jellyfin password, in Connections.')
-        else:
-            values['media_server'] = 'plex'
-            values['plex_url'] = clean_url(values['plex_url'])
-            if not values['plex_token'].strip():
-                raise ValueError('Enter your Plex token in Connections.')
-        values['qb_url'] = clean_url(values['qb_url'])
-        values['tag'] = values['tag'].strip()
-        if not values['tag'] or ',' in values['tag']:
-            raise ValueError('Use one existing tag without commas.')
-        return values
+        return checked_config({k: v.get() for k, v in self.vars.items()})
 
     def same_config(self):
         try:
@@ -400,7 +553,7 @@ class App(tk.Tk):
         except ValueError:
             return False
         return self.scan_config is not None and all(current[k] == self.scan_config[k]
-            for k in current if k not in ('remember', 'interval'))
+            for k in current if k not in storage.LOCAL_KEYS)
 
     def refresh_actions(self):
         if not hasattr(self, 'apply_button'):
@@ -435,7 +588,7 @@ class App(tk.Tk):
             if not isinstance(data, dict):
                 raise ValueError('The settings file must contain a JSON object.')
             for key in self.vars:
-                if key not in ('remember', 'interval') and isinstance(data.get(key), str):
+                if key not in storage.LOCAL_KEYS and isinstance(data.get(key), str):
                     if key == 'media_server' and data[key] not in ('plex', 'jellyfin'):
                         continue
                     self.vars[key].set(data[key])
@@ -465,6 +618,18 @@ class App(tk.Tk):
                 selected_rows = [r for r in self.rows.values() if r['status']=='READY']
             if not selected_rows:
                 messagebox.showinfo('Nothing to tag', 'No ready torrents were selected for tagging.')
+                return
+        lock = None
+        if mode != 'test':
+            # One run at a time across this window, scheduled runs and the real-time agent.
+            lock = runtime.RunLock()
+            if not lock.acquire():
+                text = 'A scheduled or real-time run is in progress. Try again in a minute.'
+                if mode == 'auto':
+                    self.append_log('Auto sync skipped: ' + text)
+                    self.next_auto = time.monotonic() + int(self.vars['interval'].get())*60
+                else:
+                    messagebox.showinfo('Busy', text)
                 return
         if mode in ('scan', 'auto'):
             self.rows.clear()
@@ -506,6 +671,8 @@ class App(tk.Tk):
                 self.events.put(('failure', public_error(exc)))
             finally:
                 engine.close()
+                if lock:
+                    lock.release()
         threading.Thread(target=worker, daemon=True).start()
 
     def stop(self):
@@ -528,6 +695,21 @@ class App(tk.Tk):
                     self.connection_state.set('CONNECTED')
                 elif kind == 'phase':
                     self.phase.set(data)
+                elif kind == 'schedule_status':
+                    self.schedule_refreshing = False
+                    self.schedule_status.set(data)
+                elif kind == 'schedule_saved':
+                    text, values = data
+                    for key in scheduler.normalize(values):
+                        self.vars[key].set(values[key])
+                    self.schedule_button.configure(state='normal')
+                    self.append_log('Schedule saved: ' + text)
+                    self.refresh_schedule_status()
+                elif kind == 'schedule_error':
+                    self.schedule_button.configure(state='normal')
+                    self.schedule_refreshing = False
+                    self.refresh_schedule_status()
+                    messagebox.showerror('Schedule', data)
                 elif kind == 'progress':
                     self.progress.stop()
                     self.progress.configure(mode='determinate', value=100*data[0]/max(data[1], 1))
@@ -690,7 +872,7 @@ class App(tk.Tk):
             self.destroy()
 
 
-if __name__ == '__main__':
+def start_gui():
     try:
         if sys.platform == 'win32':
             import ctypes
@@ -707,3 +889,12 @@ if __name__ == '__main__':
         except Exception:
             pass
         raise SystemExit(1)
+    return 0
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        # Command-line and Task Scheduler runs; see cli.py or run with --help.
+        import cli
+        sys.exit(cli.main(sys.argv[1:]))
+    start_gui()

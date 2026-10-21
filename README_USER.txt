@@ -1,8 +1,9 @@
-WATCHBRIDGE 1.1.0
+WATCHBRIDGE 1.2.0
 Plex or Jellyfin watch history -> qBittorrent tags
 
 GET STARTED
 Open WatchBridge.exe, or use RUN.bat if you have the source package.
+For the command line use WatchBridgeCLI.exe, or WatchBridgeCLI.bat from source.
 Open Connections, choose Plex or Jellyfin, and enter:
   For Plex:
     Plex server URL, such as http://localhost:32400
@@ -71,14 +72,70 @@ Errors disable automatic runs. Stop disables auto sync and requests cancellation
 after the current network request, which may take up to about 60 seconds.
 Earlier tag additions remain. A new Dry Run is required after interruption.
 
+BACKGROUND SCHEDULE (WINDOW CLOSED)
+Open Schedule, choose When, then click Save Schedule:
+  Every X minutes     every 1 minute to 31 days
+  Daily at set times  one or more 24-hour times, e.g. 03:00, 15:30
+  Weekly on set days  chosen days at chosen times
+  At Windows sign-in  once each time you sign in
+  Real time           listens for Plex or Jellyfin playback and watched-state
+                      events, waits a few seconds, then syncs; an optional
+                      full check runs every N minutes in case of a missed event
+Interval, daily and weekly can also run at sign-in. Off removes the schedule.
+WatchBridge registers one task for your Windows account in Windows Task
+Scheduler. Runs happen while you are signed in to Windows. No administrator
+rights, Windows service or stored Windows password are used.
+Background runs need Remember credentials. Saving the schedule also saves your
+connection settings. Each run scans, then tags ALL ready torrents only when the
+scan has no errors. Runs never overlap, including with the window. After the
+chosen number of consecutive failures (5 by default, 0 = never) background
+runs pause until you click Resume. Run Now starts a run immediately.
+Plex real-time events need a token from the server owner. Jellyfin events use
+the user's password or an API key. Without events, the full check still runs.
+Log: %LOCALAPPDATA%\WatchBridge\logs\watchbridge.log (Open Log).
+To stop everything: choose Off and Save Schedule, or WatchBridgeCLI schedule off.
+If you move or update WatchBridge in another folder, open Schedule and click
+Save Schedule again so the task points to the new location.
+
+COMMAND LINE
+Every option in the window is available from WatchBridgeCLI. Examples:
+  WatchBridgeCLI test
+  WatchBridgeCLI scan --status ready,unmatched --details
+  WatchBridgeCLI scan --csv C:\Reports\watched.csv --json
+  WatchBridgeCLI apply                      all ready torrents
+  WatchBridgeCLI apply --name "Show" --hash HASH   selected ready torrents
+  WatchBridgeCLI sync                       scan, then tag all ready torrents
+  WatchBridgeCLI auto --interval 15         auto sync until Ctrl+C
+  WatchBridgeCLI config show | set | import config.json | clear-credentials | path
+  WatchBridgeCLI schedule set interval --every 30m --at-logon
+  WatchBridgeCLI schedule set daily --at 03:00,15:30
+  WatchBridgeCLI schedule set weekly --days sun-thu --at 22:30
+  WatchBridgeCLI schedule set logon
+  WatchBridgeCLI schedule set realtime --delay 30 --fallback 60
+  WatchBridgeCLI schedule show | run | resume | off
+  WatchBridgeCLI agent --status | --run-now | --stop
+  WatchBridgeCLI reports --open | --list 10
+  WatchBridgeCLI logs --tail 40 | --follow | --open
+  WatchBridgeCLI guide | gui | --version
+Connection options apply to one run unless --save is added: --server,
+--plex-url, --plex-token, --plex-profile, --jf-url, --jf-user, --jf-api-key,
+--jf-password, --qb-url, --qb-user, --qb-password, --tag, --config FILE.
+Pass "-" as a secret to be prompted, or set WATCHBRIDGE_PLEX_TOKEN,
+WATCHBRIDGE_JF_API_KEY, WATCHBRIDGE_JF_PASSWORD or WATCHBRIDGE_QB_PASSWORD
+so secrets do not appear in the process list.
+Exit codes: 0 ok, 1 failed or scan errors, 2 invalid input, 3 another run in
+progress, 4 background runs paused, 130 stopped.
+
 CREDENTIALS
 Settings: %LOCALAPPDATA%\WatchBridge\settings.json
 Reports:  %LOCALAPPDATA%\WatchBridge\reports
+Logs:     %LOCALAPPDATA%\WatchBridge\logs
 Credentials are kept only in memory unless Remember credentials is enabled.
 On Windows, remembered tokens and passwords are encrypted by Windows DPAPI
 for the current Windows user. Non-secret connection settings are plain JSON.
 Uncheck Remember credentials and Save Settings to remove the saved secrets.
-The app does not use PLEX_TOKEN or QB_PASSWORD environment variables.
+The window does not read environment variables. Only the command line reads
+the WATCHBRIDGE_* variables listed above, and only when you set them.
 Personal Plex profile verification contacts plex.tv. Library data and torrent
 operations go directly to the server URLs you enter. No analytics or telemetry
 are implemented by this application. Plex, Jellyfin and qBittorrent run their own services.
@@ -97,7 +154,7 @@ When the app is stopped or an API call fails during tagging, some updates may
 already have completed. Scan again to read the actual state before retrying.
 
 Share the original source ZIP or dist\WatchBridge-Windows.zip from BUILD_EXE.bat.
-Do not include imported configs, reports, or your personal application data.
+Do not include imported configs, reports, logs, or your personal application data.
 Each recipient enters their own connection details. Source and EXE builds are
 unsigned; there is no publisher certificate in this project.
 

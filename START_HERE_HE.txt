@@ -18,6 +18,22 @@ Export CSV מייצא את כל תוצאות הווידיאו. פריטים לל
 סמן Remember credentials ולחץ Save Settings.
 ההגדרות נשמרות מחוץ לתיקיית התוכנה ולכן אינן מצורפות לחבילת השיתוף.
 
+ריצה ברקע כשהחלון סגור:
+בעמוד Schedule בחר מתי לרוץ: כל X דקות, כל יום בשעה קבועה, בימים נבחרים,
+בכל כניסה ל-Windows, או Real time (זמן אמת לפי אירועי צפייה) - ולחץ Save Schedule.
+הריצה מתבצעת דרך Task Scheduler של Windows עבור המשתמש שלך, ללא הרשאות מנהל.
+נדרש לסמן Remember credentials. Run Now מפעיל ריצה מיד, Open Log מציג את היומן.
+
+שורת פקודה:
+כל האפשרויות של החלון זמינות גם ב-WatchBridgeCLI.bat (מקוד) או ב-WatchBridgeCLI.exe.
+דוגמאות:
+  WatchBridgeCLI scan
+  WatchBridgeCLI apply
+  WatchBridgeCLI schedule set daily --at 03:00
+  WatchBridgeCLI schedule set realtime
+  WatchBridgeCLI schedule show
+לרשימה המלאה: WatchBridgeCLI --help
+
 ליצירת EXE עבור החברים:
 הרץ BUILD_EXE.bat במחשב Windows. בסיום שתף רק את:
 dist\WatchBridge-Windows.zip

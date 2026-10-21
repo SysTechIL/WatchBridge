@@ -308,28 +308,19 @@ class App(tk.Tk):
         self.save_button.pack(side='left', padx=8)
         self.import_button = self.button(actions, 'Import config.json', self.import_settings)
         self.import_button.pack(side='left')
-        auto_frame = tk.Frame(parent, bg=PANEL, padx=18, pady=14)
-        auto_frame.pack(fill='x')
-        ttk.Checkbutton(auto_frame, text='Auto sync and apply tags while this app is open', variable=self.auto,
-                         command=self.auto_changed).pack(anchor='w')
-        row = tk.Frame(auto_frame, bg=PANEL)
-        row.pack(fill='x', pady=(10, 0))
-        self.label(row, 'Run every', 10, MUTED, PANEL).pack(side='left')
-        ttk.Combobox(row, textvariable=self.vars['interval'], state='readonly',
-                     values=['5', '10', '15', '30', '60'], width=5).pack(side='left', padx=10)
-        self.label(row, 'minutes. Each run checks watched state before adding tags.', 9, MUTED, PANEL).pack(side='left')
         self.label(parent, 'Settings are saved per user. The app folder contains no personal configuration. '
-                   'To run with this window closed, use Schedule.', 9, MUTED).pack(anchor='w', pady=(14, 0))
+                   'To sync automatically, use Schedule.', 9, MUTED).pack(anchor='w')
 
     def _schedule(self, parent):
-        self.label(parent, 'Run WatchBridge in the background with this window closed, while you are signed in to Windows.',
+        self.label(parent, 'Choose when WatchBridge syncs on its own: in the background, or only while this window is open.',
                    11, MUTED).pack(anchor='w', pady=(0, 18))
         card = tk.Frame(parent, bg=PANEL, padx=20, pady=18)
         card.pack(fill='x')
         self.label(card, 'Background schedule', 17, TEXT, PANEL, True).pack(anchor='w')
-        self.label(card, 'Each run scans, then adds the tag to all ready torrents only when the scan has no errors. '
-                   'Uses Windows Task Scheduler; no administrator rights or Windows service.',
-                   9, MUTED, PANEL).pack(anchor='w', pady=(4, 16))
+        self.label(card, 'Runs with this window closed while you are signed in to Windows, through Windows Task Scheduler '
+                   '(no administrator rights or service). Each run scans, then tags all ready torrents only when the scan '
+                   'has no errors. Saving also saves your connection settings, which must be remembered.',
+                   9, MUTED, PANEL, justify='left', wraplength=1000).pack(anchor='w', pady=(4, 16))
         self.schedule_mode = tk.StringVar(value=scheduler.MODES.get(self.vars['schedule_mode'].get(), 'Off'))
         self.day_vars = {}
         try:
@@ -406,9 +397,18 @@ class App(tk.Tk):
         self.schedule_status = tk.StringVar(value='Reading Task Scheduler...')
         tk.Label(status, textvariable=self.schedule_status, bg=PANEL, fg=TEXT, justify='left', anchor='w',
                  font=('Consolas', 10), wraplength=1000).pack(anchor='w')
-        self.label(parent, 'Saving the schedule also saves your connection settings, which must be remembered. '
-                   'Command line: WatchBridgeCLI schedule set interval --every 30m  |  schedule show  |  schedule off',
-                   9, MUTED, wraplength=1000, justify='left').pack(anchor='w', pady=(14, 0))
+        # The in-app timer: no saved credentials needed, but it stops when the window closes.
+        window = tk.Frame(parent, bg=PANEL, padx=18, pady=14)
+        window.pack(fill='x', pady=(16, 0))
+        self.label(window, 'WHILE THIS WINDOW IS OPEN', 9, MUTED, PANEL, True).pack(anchor='w', pady=(0, 6))
+        row = tk.Frame(window, bg=PANEL)
+        row.pack(fill='x')
+        ttk.Checkbutton(row, text='Auto sync and apply tags every', variable=self.auto,
+                        command=self.auto_changed).pack(side='left')
+        ttk.Combobox(row, textvariable=self.vars['interval'], state='readonly',
+                     values=['5', '10', '15', '30', '60'], width=5).pack(side='left', padx=10)
+        self.label(row, 'minutes. Off at every start; errors turn it off. Works without remembered credentials.',
+                   9, MUTED, PANEL).pack(side='left')
         self.schedule_refreshing = False
         self.show_schedule_fields()
 

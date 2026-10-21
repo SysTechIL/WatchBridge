@@ -13,6 +13,8 @@
 - Add a full command line, `WatchBridgeCLI`, with every window option: test, scan/dry-run with
   filters, JSON and CSV, apply all or selected torrents, sync, auto, config, schedule, agent,
   reports and logs. Secrets can be prompted for or read from `WATCHBRIDGE_*` variables.
+- Move the in-window auto sync from Connections to the Schedule page ("While this window is open"),
+  so all timing options are in one place.
 - The build now produces `WatchBridgeCLI.exe` beside `WatchBridge.exe`.
 - New dependency: `websocket-client`.
 - Replace documentation screenshots with demo data, and add Schedule screenshots.

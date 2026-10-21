@@ -139,8 +139,9 @@ Choose **All ready torrents** or select rows with Ctrl/Shift and choose
 reports are accessible through **Activity > Open Reports Folder**. Non-video
 torrents are excluded from the table and reports.
 
-Optional auto sync scans and applies tags to all ready torrents at your chosen
-interval, while the app is open. It starts disabled, ignores table selections and
+Optional auto sync, under **Schedule > While this window is open**, scans and applies tags to
+all ready torrents at your chosen interval while the app is open, without remembered
+credentials. It starts disabled, ignores table selections and
 filters, and stops on errors. Stop takes effect after the current network request;
 tags already added remain. Existing tags are never removed when a title becomes
 unwatched on the media server.

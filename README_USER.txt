@@ -66,7 +66,8 @@ Keep reports private if your filenames or paths are personal.
 
 AUTOMATION AND STOP
 Auto sync and apply tags is optional, disabled every time the app starts,
-and runs only while this app is open. Choose the interval in Connections.
+and runs only while this app is open. Turn it on and choose the interval in
+Schedule > While this window is open. It works without remembered credentials.
 It applies to ALL ready torrents, regardless of table selection or filters.
 Errors disable automatic runs. Stop disables auto sync and requests cancellation
 after the current network request, which may take up to about 60 seconds.

@@ -8,7 +8,7 @@ import threading
 import time
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
-from engine import SyncEngine, checked_config, public_error
+from engine import SyncEngine, ca_bundle, checked_config, device_id, public_error
 import runtime
 import settings as storage
 
@@ -35,8 +35,8 @@ class Debouncer:
         now = self.clock()
         if self.last is not None and (now - self.last >= self.delay or now - self.first >= self.delay * MAX_WAIT):
             return self.reason
-        if self.fallback and self.next_full is not None and now >= self.next_full:
-            return 'fallback check'
+        if self.next_full is not None and now >= self.next_full:
+            return self.reason or 'fallback check'
         return None
 
     def ran(self):
@@ -44,6 +44,7 @@ class Debouncer:
         self.next_full = self.clock() + self.fallback if self.fallback else None
 
     def retry(self, seconds):
+        """Try again after `seconds`, keeping the reason of a pending event, even when fallback checks are off."""
         self.first = self.last = None
         self.next_full = self.clock() + seconds
 
@@ -161,20 +162,36 @@ class Listener(threading.Thread):
         return self.values.get('media_server') == 'jellyfin'
 
     def open(self, websocket):
+        options = {'timeout': 5}
+        if self.values.get('ca_file'):
+            options['sslopt'] = {'ca_certs': ca_bundle(self.values['ca_file'])}
         if self.jellyfin:
-            engine = SyncEngine(self.values)
+            # Its own device id and no logout, so syncs do not end this listener's login.
+            engine = SyncEngine(self.values, role='agent')
             try:
                 engine.connect_jellyfin()
-                token, user_id = engine.jf_token, engine.jf_user_id
+                token, user_id, auth = engine.jf_token, engine.jf_user_id, engine.jf.headers['Authorization']
             finally:
-                engine.close()
-            url = websocket_url(self.values['jf_url'], '/socket', {'api_key': token, 'deviceId': 'watchbridge-agent'})
-            ws = websocket.create_connection(url, timeout=5)
+                engine.close(logout=False)
+            ws = self.connect(websocket, self.values['jf_url'], '/socket', {'deviceId': device_id('agent')},
+                              'Authorization: ' + auth, {'api_key': token}, options)
             ws.send(json.dumps({'MessageType': 'SessionsStart', 'Data': '0,1500'}))
             return ws, JellyfinState(user_id).trigger, 30
-        url = websocket_url(self.values['plex_url'], '/:/websockets/notifications',
-                            {'X-Plex-Token': self.values['plex_token'].strip()})
-        return websocket.create_connection(url, timeout=5), plex_trigger, 30
+        token = self.values['plex_token'].strip()
+        ws = self.connect(websocket, self.values['plex_url'], '/:/websockets/notifications', {},
+                          'X-Plex-Token: ' + token, {'X-Plex-Token': token}, options)
+        return ws, plex_trigger, 30
+
+    @staticmethod
+    def connect(websocket, base, path, query, header, token_query, options):
+        """Send the token in a header, which servers and proxies do not log. Servers that refuse it get the
+        token in the address instead."""
+        try:
+            return websocket.create_connection(websocket_url(base, path, query), header=[header], **options)
+        except websocket.WebSocketBadStatusException as exc:
+            if getattr(exc, 'status_code', None) not in (400, 401, 403):
+                raise
+        return websocket.create_connection(websocket_url(base, path, dict(query, **token_query)), **options)
 
     def keepalive(self, message, current):
         if message.get('MessageType') == 'ForceKeepAlive':
@@ -225,13 +242,15 @@ def configure(values):
         if not values.get('remember'):
             raise ValueError('Background runs need remembered credentials. Turn on "Remember credentials" in '
                              'Connections, or run: WatchBridgeCLI config set --remember, then try again.')
-    storage.save(values)
     if not request_stop():
         scheduler.end()
+    # Change Task Scheduler first, so a refused change leaves the saved schedule as it was.
     if mode == 'off':
         scheduler.remove()
     else:
         scheduler.install(values)
+    storage.save(values)
+    if mode != 'off':
         runtime.resume()
         if mode == 'realtime':
             scheduler.run_now()

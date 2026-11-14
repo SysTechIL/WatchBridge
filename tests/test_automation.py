@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import types
 import unittest
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
@@ -159,6 +160,12 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(arguments.endswith('watchbridge.py" agent') or arguments.endswith('watchbridge.py agent'))
         self.assertEqual(Path(workdir), Path(scheduler.__file__).resolve().parent)
 
+    def test_query_ignores_translated_not_available(self):
+        out = '"PC","\\WatchBridge (me)","לא זמין","מוכן","x","לא זמין","1"\r\n'
+        with patch.object(scheduler, '_schtasks', return_value=(0, out)):
+            info = scheduler.query()
+        self.assertEqual((info['next_run'], info['last_run'], info['last_result']), ('', '', ''))
+
     def test_query_parses_schtasks_csv(self):
         out = ('"PC","\\WatchBridge (Tester)","22/10/2026 03:00:00","Ready","Interactive only",'
                '"30/11/1999 00:00:00","267011","N/A"\n')
@@ -217,6 +224,25 @@ class RuntimeTests(TempAppDir):
             FakeEngine.fail = None
         self.assertEqual(code, runtime.FAILED)
         self.assertNotIn('secret', result['message'])
+
+    def test_reports_keep_newest(self):
+        runtime.REPORTS.mkdir(parents=True)
+        for i in range(5):
+            (runtime.REPORTS / ('watchbridge-2026010%d-000000-000000.csv' % i)).write_text('x')
+        (runtime.REPORTS / 'my-notes.csv').write_text('x')
+        runtime.save_report([row('READY')], '3')
+        names = sorted(p.name for p in runtime.REPORTS.glob('*.csv'))
+        self.assertEqual(len(names), 4)
+        self.assertIn('my-notes.csv', names)
+        self.assertNotIn('watchbridge-20260102-000000-000000.csv', names)
+        runtime.save_report([row('READY')], '0')
+        self.assertEqual(len(list(runtime.REPORTS.glob('*.csv'))), 5)
+
+    def test_paused_failures_do_not_keep_counting(self):
+        for _ in range(4):
+            runtime.record_failure('schedule', 'bad', 2)
+        state = runtime.read_state()
+        self.assertEqual((state['failures'], state['paused']), (2, True))
 
     def test_busy_and_paused_skip(self):
         lock = runtime.RunLock()
@@ -333,7 +359,52 @@ class AgentTests(TempAppDir):
             text = agent.configure(config(schedule_mode='realtime', remember=True))
             agent.configure(config(schedule_mode='off'))
         self.assertIn('Real time', text)
-        self.assertEqual(calls, [('save', 'realtime'), 'install', 'run', ('save', 'off'), 'remove'])
+        self.assertEqual(calls, ['install', ('save', 'realtime'), 'run', 'remove', ('save', 'off')])
+
+    def test_configure_keeps_settings_when_task_scheduler_refuses(self):
+        def refuse(values):
+            raise RuntimeError('Task Scheduler refused the change: denied')
+        saved = []
+        with patch.object(agent.storage, 'save', saved.append), patch.object(scheduler, 'install', refuse):
+            with self.assertRaises(RuntimeError):
+                agent.configure(config(schedule_mode='interval', remember=True))
+        self.assertEqual(saved, [])
+
+    def test_debouncer_keeps_event_when_busy_without_fallback(self):
+        now = [0.0]
+        d = agent.Debouncer(10, 0, clock=lambda: now[0])
+        d.poke('Plex playback stopped')
+        now[0] = 10
+        self.assertEqual(d.due(), 'Plex playback stopped')
+        d.retry(60)
+        now[0] = 69
+        self.assertIsNone(d.due())
+        now[0] = 70
+        self.assertEqual(d.due(), 'Plex playback stopped')
+        d.ran()
+        now[0] = 100000
+        self.assertIsNone(d.due())
+
+    def test_websocket_token_in_header_with_address_fallback(self):
+        class BadStatus(Exception):
+            def __init__(self, code):
+                self.status_code = code
+        calls = []
+
+        def create_connection(url, **kw):
+            calls.append((url, kw.get('header')))
+            if kw.get('header'):
+                raise BadStatus(401)
+            return 'ws'
+        ws = types.SimpleNamespace(create_connection=create_connection, WebSocketBadStatusException=BadStatus)
+        self.assertEqual(agent.Listener.connect(ws, 'http://localhost:32400', '/:/websockets/notifications', {},
+                                                'X-Plex-Token: t', {'X-Plex-Token': 't'}, {'timeout': 5}), 'ws')
+        self.assertEqual(calls, [('ws://localhost:32400/:/websockets/notifications', ['X-Plex-Token: t']),
+                                 ('ws://localhost:32400/:/websockets/notifications?X-Plex-Token=t', None)])
+        calls.clear()
+        ws.create_connection = lambda url, **kw: calls.append(url) or 'ws'
+        agent.Listener.connect(ws, 'http://localhost:32400', '/n', {}, 'X-Plex-Token: t', {'X-Plex-Token': 't'}, {})
+        self.assertEqual(calls, ['ws://localhost:32400/n'])
 
 
 class CliTests(TempAppDir):
@@ -442,6 +513,34 @@ class CliTests(TempAppDir):
         with patch.object(cli.storage, 'save', lambda v: saved.update(v)):
             code, _, _ = self.run_cli('config', 'set', '--qb-url', 'http://nas:8080', '--tag', 'Seen', '--interval', '15')
         self.assertEqual((code, saved['qb_url'], saved['tag'], saved['interval']), (0, 'http://nas:8080', 'Seen', '15'))
+
+    def test_config_set_rejects_bad_numbers(self):
+        with patch.object(cli.storage, 'save', lambda v: None):
+            self.assertEqual(self.run_cli('config', 'set', '--interval', 'abc')[0], runtime.USAGE)
+            self.assertEqual(self.run_cli('config', 'set', '--keep-reports', '-1')[0], runtime.USAGE)
+
+    def test_unreadable_settings_are_not_overwritten(self):
+        saved = []
+        kept = dict(settings.DEFAULTS, qb_url='http://nas:8080', schedule_mode='daily')
+
+        def unreadable():
+            raise settings.Unreadable('Saved credentials could not be unlocked for this Windows user.', dict(kept))
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(cli.storage, 'load', unreadable), patch.object(cli.storage, 'save', saved.append), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(cli.main(['config', 'set', '--tag', 'Seen']), runtime.FAILED)
+            self.assertEqual(saved, [])
+            self.assertEqual(cli.main(['config', 'set', '--tag', 'Seen', '--no-remember']), runtime.OK)
+        self.assertEqual((saved[0]['qb_url'], saved[0]['schedule_mode'], saved[0]['tag']),
+                         ('http://nas:8080', 'daily', 'Seen'))
+        self.assertIn('could not be unlocked', err.getvalue())
+
+    def test_typed_secret_warns(self):
+        args = cli.parser().parse_args(['test', '--qb-password', 'typed'])
+        err = io.StringIO()
+        with patch.object(cli.storage, 'load', return_value=config()), contextlib.redirect_stderr(err):
+            self.assertEqual(cli.resolve(args)['qb_password'], 'typed')
+        self.assertIn('WATCHBRIDGE_QB_PASSWORD', err.getvalue())
 
     def test_engine_version_matches(self):
         self.assertIn(engine.__version__, cli.parser().format_help())

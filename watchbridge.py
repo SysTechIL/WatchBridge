@@ -54,9 +54,13 @@ class App(tk.Tk):
         self.error_on_load = None
         try:
             values = storage.load()
+        except storage.Unreadable as exc:
+            values = exc.values
+            self.error_on_load = (str(exc) + ' Other settings were kept. Enter your credentials again; '
+                                  'saving keeps the previous file as settings.bak.')
         except Exception:
             values = dict(storage.DEFAULTS)
-            self.error_on_load = 'Saved settings could not be unlocked. Enter your connection details again.'
+            self.error_on_load = 'Saved settings could not be read. Enter your connection details again.'
         self.vars = {k: tk.BooleanVar(value=v) if isinstance(v, bool) else tk.StringVar(value=v)
                      for k, v in values.items()}
         self.search = tk.StringVar()
@@ -297,6 +301,17 @@ class App(tk.Tk):
             command=lambda: [entry.configure(show='' if self.show_secrets.get() else '*') for entry in self.secret_entries]).pack(anchor='w')
         self.remember_check = ttk.Checkbutton(options, text='Remember credentials on this Windows account (encrypted)', variable=self.vars['remember'])
         self.remember_check.pack(anchor='w', pady=(5, 0))
+        ca = tk.Frame(options, bg=PANEL)
+        ca.pack(fill='x', pady=(8, 0))
+        self.label(ca, 'Trusted certificate (optional, for https with a self-signed certificate)', 10, MUTED,
+                   PANEL).pack(side='left')
+        ca_entry = ttk.Entry(ca, textvariable=self.vars['ca_file'])
+        ca_entry.pack(side='left', fill='x', expand=True, padx=(10, 8))
+        install_edit_menu(ca_entry)
+        self.inputs.append(ca_entry)
+        browse = self.button(ca, 'Browse', self.choose_ca_file)
+        browse.pack(side='left')
+        self.inputs.append(browse)
         if sys.platform != 'win32':
             self.vars['remember'].set(False)
             self.remember_check.configure(state='disabled')
@@ -310,6 +325,12 @@ class App(tk.Tk):
         self.import_button.pack(side='left')
         self.label(parent, 'Settings are saved per user. The app folder contains no personal configuration. '
                    'To sync automatically, use Schedule.', 9, MUTED).pack(anchor='w')
+
+    def choose_ca_file(self):
+        filename = filedialog.askopenfilename(title='Certificate to trust',
+                                              filetypes=[('Certificates', '*.pem *.crt *.cer'), ('All files', '*.*')])
+        if filename:
+            self.vars['ca_file'].set(filename)
 
     def _schedule(self, parent):
         self.label(parent, 'Choose when WatchBridge syncs on its own: in the background, or only while this window is open.',
@@ -508,11 +529,23 @@ class App(tk.Tk):
         bar.pack(fill='x', pady=(0, 14))
         self.label(bar, 'Connection checks, scan progress and verified tag changes.', 10, MUTED).pack(side='left')
         self.button(bar, 'Open Reports Folder', self.open_reports).pack(side='right')
+        self.label(bar, '  reports (0 = all)   ', 9, MUTED).pack(side='right')
+        keep = ttk.Combobox(bar, textvariable=self.vars['keep_reports'], state='readonly', width=5,
+                            values=['20', '50', '100', '500', '0'])
+        keep.pack(side='right')
+        keep.bind('<<ComboboxSelected>>', lambda _e: self.save_keep_reports())
+        self.label(bar, 'Keep the newest ', 9, MUTED).pack(side='right')
         self.log = tk.Text(parent, bg=PANEL, fg=MUTED, relief='flat', padx=16, pady=15,
                            font=('Consolas', 10), wrap='word', state='disabled')
         self.log.pack(fill='both', expand=True)
         install_edit_menu(self.log)
         self.append_log('Welcome to WatchBridge. Dry Run reads data; Apply Tags adds tags.')
+
+    def save_keep_reports(self):
+        try:
+            storage.save_local(keep_reports=self.vars['keep_reports'].get())
+        except Exception as exc:
+            self.append_log('Could not save the report setting: ' + public_error(exc))
 
     def _help(self, parent):
         body = GUIDE
@@ -573,7 +606,11 @@ class App(tk.Tk):
 
     def save_settings(self):
         try:
-            storage.save(self.config())
+            values = self.config()
+            # The schedule is saved only with Save Schedule, so the file matches Task Scheduler.
+            saved = storage.load_plain()
+            values.update({k: saved[k] for k in storage.SCHEDULE_KEYS})
+            storage.save(values)
             self.append_log('Settings saved for this Windows user.')
             messagebox.showinfo('Settings saved', 'Connection settings saved. Credentials are remembered only if selected.')
         except Exception as exc:
@@ -803,7 +840,15 @@ class App(tk.Tk):
     def sort_table(self, key):
         reverse = getattr(self, 'sort_key', None) == key and not getattr(self, 'sort_reverse', False)
         self.sort_key, self.sort_reverse = key, reverse
-        items = sorted(self.rows.items(), key=lambda x: str(x[1].get(key, '')).casefold(), reverse=reverse)
+        if key == 'watched_files':
+            # Share of video files watched, then the count; rows without counts (errors) sort first.
+            def order(row):
+                total = row.get('video_files')
+                return (row['watched_files'] / total, total) if isinstance(total, int) and total else (-1, 0)
+        else:
+            def order(row):
+                return str(row.get(key, '')).casefold()
+        items = sorted(self.rows.items(), key=lambda x: order(x[1]), reverse=reverse)
         self.rows = dict(items)
         self.refresh_table()
 
@@ -827,8 +872,7 @@ class App(tk.Tk):
         if not self.rows:
             return
         try:
-            self.last_report = storage.APP_DIR / 'reports' / report_name()
-            write_report(self.last_report, self.rows.values())
+            self.last_report = runtime.save_report(list(self.rows.values()), self.vars['keep_reports'].get())
             self.append_log('CSV report saved in your reports folder.')
         except Exception:
             self.append_log('Could not save the automatic report. Use Export CSV to choose another folder.')

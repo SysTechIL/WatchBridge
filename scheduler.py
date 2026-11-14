@@ -228,8 +228,9 @@ def query():
     if not rows:
         return {'exists': True}
     row = rows[0]
-    last = '' if '1999' in row[5] else row[5]
-    return {'exists': True, 'next_run': '' if row[2] in ('N/A', '') else row[2], 'status': row[3],
+    # "N/A" and the never-run date are translated on non-English Windows; a real date always has digits.
+    last = '' if '1999' in row[5] or not re.search(r'\d', row[5]) else row[5]
+    return {'exists': True, 'next_run': row[2] if re.search(r'\d', row[2]) else '', 'status': row[3],
             'last_run': last, 'last_result': row[6] if last else ''}
 
 

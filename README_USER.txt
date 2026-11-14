@@ -1,4 +1,4 @@
-WATCHBRIDGE 1.2.0
+WATCHBRIDGE 1.3.0
 Plex or Jellyfin watch history -> qBittorrent tags
 
 GET STARTED
@@ -60,7 +60,9 @@ state for the matched library item.
 CSV AND ACTIVITY
 Export CSV saves ALL currently scanned video results, regardless of search
 or status filters. Automatic reports are written after scans and tag updates.
-Activity > Open Reports Folder opens them. Rows contain torrent names, hashes,
+Activity > Open Reports Folder opens them. The newest 100 are kept; change
+the number in Activity or with: WatchBridgeCLI config set --keep-reports N
+(0 keeps all). Rows contain torrent names, hashes,
 watch counts, errors and unmatched paths; never passwords, tokens or cookies.
 Keep reports private if your filenames or paths are personal.
 
@@ -128,7 +130,7 @@ Exit codes: 0 ok, 1 failed or scan errors, 2 invalid input, 3 another run in
 progress, 4 background runs paused, 130 stopped.
 
 CREDENTIALS
-Settings: %LOCALAPPDATA%\WatchBridge\settings.json
+Settings: %LOCALAPPDATA%\WatchBridge\settings.json (previous version: settings.bak)
 Reports:  %LOCALAPPDATA%\WatchBridge\reports
 Logs:     %LOCALAPPDATA%\WatchBridge\logs
 Credentials are kept only in memory unless Remember credentials is enabled.

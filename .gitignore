@@ -15,6 +15,7 @@ config.json
 config.*.json
 settings.json
 settings.tmp
+settings.bak
 .env
 .env.*
 *.key

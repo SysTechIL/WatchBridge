@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.0
+
+- Saved settings that cannot be read in full are no longer replaced by defaults. The window and
+  the command line keep every setting that can be read; the command line refuses to save over the
+  file until you choose `--remember` or `--no-remember`, and each save keeps the previous file as
+  `settings.bak`.
+- Real time: an event that arrives while another run is busy is retried, also when the full check
+  is set to 0.
+- Automatic reports are pruned: the newest 100 are kept by default. Change it in Activity or with
+  `config set --keep-reports N` (0 keeps all).
+- Save Settings no longer saves unsaved Schedule changes, so the saved schedule always matches
+  Task Scheduler. A schedule change that Task Scheduler refuses no longer changes the settings.
+- Jellyfin uses a separate device id per computer, Windows user and role, so a sync no longer ends
+  the real-time listener's login, and password logins are logged out after each run.
+- qBittorrent sessions are logged out after each run.
+- Sorting by Watched orders by the share of files watched instead of alphabetically.
+- The progress bar advances for every torrent while tagging, including skipped ones.
+- `config set` reports an invalid number instead of crashing.
+- Task Scheduler status shows correctly on non-English Windows.
+- Security: tokens for real-time events are sent in a header instead of the address when the
+  server accepts it; a warning appears when credentials would cross the network over plain
+  `http://`; CSV reports also neutralize cells starting with Tab or a carriage return; secrets typed
+  on the command line print a warning; remembered credentials use extra DPAPI entropy (credentials
+  saved by earlier versions are still read).
+- New: a trusted certificate file for https servers with a self-signed certificate
+  (Connections, or `--ca-file`). It is added to the standard certificate list.
+
 ## 1.2.0
 
 - Add a Schedule page to run in the background with the window closed: every X minutes, daily or

@@ -5,6 +5,22 @@
 A Windows desktop GUI and command line for adding a qBittorrent tag based on one Plex or Jellyfin
 user's watched state. It can run on demand, on a background schedule, or in real time.
 
+## What's new in 1.3.0
+
+- **Safer settings:** settings that cannot be read in full are kept instead of being replaced by
+  defaults, and every save keeps the previous file as `settings.bak`.
+- **More reliable real time:** an event that arrives during another run is no longer lost, and
+  Jellyfin syncs no longer disconnect the real-time listener.
+- **Report cleanup:** only the newest 100 automatic reports are kept by default (changeable).
+- **Self-signed certificates:** trust your server's certificate under Connections or with `--ca-file`.
+- **Security:** a warning for unencrypted `http://` addresses on other computers, real-time tokens
+  sent in a header instead of the address, stronger CSV protection, a warning for secrets typed on
+  the command line, and stronger encryption of remembered credentials.
+- **Fixes:** Watched column sorting, tagging progress, a crash on invalid `config set` numbers,
+  Save Settings no longer saving unsaved schedule changes, Task Scheduler status on non-English Windows.
+
+The full list is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Screenshots
 
 All screenshots use demo data.
@@ -56,11 +72,13 @@ the OS where they are run. The EXE is unsigned.
 
 - Dry Run with no tag changes; Apply Tags for all ready or selected ready torrents.
 - Background workers, progress, safe cancellation, filters, search and per-torrent details.
-- CSV export and automatic reports, excluding non-video torrents.
+- CSV export and automatic reports, excluding non-video torrents; old reports are cleaned up.
 - Exact file matching, including season packs and multiple episodes in one file.
 - Plex and Jellyfin media servers, chosen in Connections.
 - Profile or user verification and support for qBittorrent's empty HTTP 200/204 login replies.
 - Optional Windows DPAPI credential storage. No personal account is bundled.
+- Trusted certificate file for https servers with a self-signed certificate, and a warning when
+  credentials would cross the network over plain http.
 - Optional in-app auto sync; off at every startup, errors stop automatic runs.
 - Background schedule with the window closed: every X minutes, daily or weekly at set times,
   at Windows sign-in, or real time on Plex/Jellyfin playback and watched-state events.
@@ -136,8 +154,14 @@ Choose **All ready torrents** or select rows with Ctrl/Shift and choose
 | Error | An API request failed. Resolve it and scan again before tagging. |
 
 **Export CSV** saves all video results, independent of table filters. Automatic
-reports are accessible through **Activity > Open Reports Folder**. Non-video
+reports are accessible through **Activity > Open Reports Folder**. Only the newest
+100 are kept by default; change the number in **Activity** or with
+`WatchBridgeCLI config set --keep-reports N` (0 keeps all). Non-video
 torrents are excluded from the table and reports.
+
+For an https server with a self-signed certificate, choose its certificate file under
+**Connections > Trusted certificate** (or `--ca-file`). It is added to the standard
+certificate checks, which are never turned off.
 
 Optional auto sync, under **Schedule > While this window is open**, scans and applies tags to
 all ready torrents at your chosen interval while the app is open, without remembered

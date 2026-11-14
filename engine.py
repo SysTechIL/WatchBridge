@@ -1,20 +1,30 @@
 """WatchBridge matching and API operations. No GUI or persistent secrets here."""
 import csv
+import hashlib
+import ipaddress
 import ntpath
+import os
 import re
+import tempfile
 import threading
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
-__version__ = '1.2.0'
+__version__ = '1.3.0'
 VIDEO = {'.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.mpg', '.mpeg',
          '.ts', '.m2ts', '.mts', '.webm', '.vob', '.flv', '.ogv', '.divx'}
 
 
 class Cancelled(Exception):
     pass
+
+
+def device_id(role):
+    """Stable Jellyfin device id per computer, Windows user and role, so sessions do not replace each other."""
+    seed = os.environ.get('COMPUTERNAME', '') + '\\' + os.environ.get('USERNAME', '')
+    return 'watchbridge-' + hashlib.sha256(seed.encode()).hexdigest()[:12] + '-' + role
 
 
 def norm(value):
@@ -46,7 +56,50 @@ def checked_config(values):
     values['tag'] = values.get('tag', '').strip()
     if not values['tag'] or ',' in values['tag']:
         raise ValueError('Use one existing tag without commas.')
+    values['ca_file'] = values.get('ca_file', '').strip().strip('"')
+    if values['ca_file'] and not os.path.isfile(values['ca_file']):
+        raise ValueError('The certificate file in Connections does not exist.')
     return values
+
+
+def local_host(url):
+    host = urlsplit(url).hostname or ''
+    if host == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def plain_http(values):
+    """Names of services whose credentials would cross the network unencrypted."""
+    media = values.get('media_server') == 'jellyfin'
+    keys = [('Jellyfin' if media else 'Plex', 'jf_url' if media else 'plex_url'), ('qBittorrent', 'qb_url')]
+    return [name for name, key in keys
+            if urlsplit(values.get(key, '')).scheme == 'http' and not local_host(values.get(key, ''))]
+
+
+_bundles = {}
+
+
+def ca_bundle(path):
+    """Value for requests' verify: the system list, or the system list plus a user certificate.
+
+    The user certificate is added rather than used alone, so plex.tv stays verifiable.
+    """
+    if not path:
+        return True
+    key = (path, os.path.getmtime(path))
+    if key not in _bundles:
+        import certifi
+        with open(certifi.where(), 'rb') as base, open(path, 'rb') as extra:
+            data = base.read() + b'\n' + extra.read()
+        handle, bundle = tempfile.mkstemp(prefix='watchbridge-ca-', suffix='.pem')
+        with os.fdopen(handle, 'wb') as stream:
+            stream.write(data)
+        _bundles[key] = bundle
+    return _bundles[key]
 
 
 def media_files(files):
@@ -83,8 +136,11 @@ def public_error(exc):
 
 
 class SyncEngine:
-    def __init__(self, settings, emit=None, cancel=None):
+    def __init__(self, settings, emit=None, cancel=None, role='sync'):
         self.settings = dict(settings)
+        self.role = role
+        self.jf_logged_in = False
+        self.qb_logged_in = False
         self.emit = emit or (lambda kind, data: None)
         self.cancel = cancel or threading.Event()
         self.qb = None
@@ -118,6 +174,7 @@ class SyncEngine:
         self.checkpoint()
         self.qb_url = clean_url(self.settings.get('qb_url', ''))
         self.qb = requests.Session()
+        self.qb.verify = ca_bundle(self.settings.get('ca_file', ''))
         parts = urlsplit(self.qb_url)
         self.qb.headers.update({'Referer': self.qb_url + '/',
                                'Origin': urlunsplit((parts.scheme, parts.netloc, '', '', ''))})
@@ -125,6 +182,7 @@ class SyncEngine:
                                                 'password': self.settings.get('qb_password', '')})
         if login.text.strip() == 'Fails.':
             raise RuntimeError('qBittorrent rejected the login. Check the Web UI username and password.')
+        self.qb_logged_in = True
         try:
             version = self.request('app/version').text.strip()
             tags = self.request('torrents/tags').json()
@@ -144,7 +202,12 @@ class SyncEngine:
         if not token:
             raise ValueError('Enter your personal Plex token in Connections.')
         try:
-            plex = PlexServer(clean_url(self.settings.get('plex_url', '')), token=token, timeout=60)
+            session = None
+            if self.settings.get('ca_file'):
+                import requests
+                session = requests.Session()
+                session.verify = ca_bundle(self.settings['ca_file'])
+            plex = PlexServer(clean_url(self.settings.get('plex_url', '')), token=token, session=session, timeout=60)
             account = plex.myPlexAccount()
             wanted = self.settings.get('plex_user', '').strip().casefold()
             names = {str(getattr(account, k, '') or '').strip().casefold()
@@ -185,8 +248,8 @@ class SyncEngine:
             raise RuntimeError('The address did not return valid Jellyfin API data.') from None
 
     def jf_auth(self, token=None):
-        value = ('MediaBrowser Client="WatchBridge", Device="Windows", DeviceId="watchbridge", Version="'
-                 + __version__ + '"')
+        value = ('MediaBrowser Client="WatchBridge", Device="Windows", DeviceId="' + device_id(self.role)
+                 + '", Version="' + __version__ + '"')
         self.jf_token = token
         self.jf.headers['Authorization'] = value + (', Token="' + token + '"' if token else '')
 
@@ -202,6 +265,7 @@ class SyncEngine:
         if not key and not password:
             raise ValueError('Enter a Jellyfin API key, or your Jellyfin password, in Connections.')
         self.jf = requests.Session()
+        self.jf.verify = ca_bundle(self.settings.get('ca_file', ''))
         if key:
             self.jf_auth(key)
             users = self.jf_request('/Users')
@@ -218,6 +282,7 @@ class SyncEngine:
             if not isinstance(login, dict) or not login.get('AccessToken') or not isinstance(login.get('User'), dict):
                 raise RuntimeError('This address does not appear to be a Jellyfin server.')
             self.jf_auth(login['AccessToken'])
+            self.jf_logged_in = True
             user = login['User']
         if not user.get('Id'):
             raise RuntimeError('Jellyfin did not return a user id.')
@@ -228,6 +293,9 @@ class SyncEngine:
         return title
 
     def connect(self):
+        for name in plain_http(self.settings):
+            self.emit('log', 'Warning: the ' + name + ' address uses http:// on another computer, so its credentials '
+                      'cross the network unencrypted. Use https:// where the server supports it.')
         version, tags = self.connect_qb()
         profile = self.connect_jellyfin() if self.server == 'jellyfin' else self.connect_plex()
         tag = self.settings.get('tag', 'Watched').strip()
@@ -353,6 +421,7 @@ class SyncEngine:
         added = 0
         for i, row in enumerate(ready, 1):
             self.checkpoint()
+            self.emit('progress', (i - 1, len(ready)))
             current = self.request('torrents/info', params={'hashes': row['hash']}).json()
             if len(current) != 1:
                 self.emit('log', 'Skipped a torrent that is no longer available: ' + row['torrent'])
@@ -372,11 +441,22 @@ class SyncEngine:
             row['status'] = 'TAGGED'
             self.emit('updated', dict(row))
             self.emit('log', 'Tagged: ' + row['torrent'])
-            self.emit('progress', (i, len(ready)))
             added += 1
+        self.emit('progress', (len(ready), len(ready)))
         return added
 
-    def close(self):
+    def close(self, logout=True):
+        """End server sessions. logout=False keeps a Jellyfin login token valid for the real-time listener."""
+        if logout and self.qb_logged_in:
+            try:
+                self.qb.post(self.qb_url + '/api/v2/auth/logout', timeout=5)
+            except Exception:
+                pass
+        if logout and self.jf_logged_in:
+            try:
+                self.jf.post(self.jf_url + '/Sessions/Logout', timeout=5)
+            except Exception:
+                pass
         for session in (self.qb, self.jf):
             if session:
                 session.close()
@@ -394,7 +474,7 @@ def write_report(path, rows):
             if row['status'] == 'NO_VIDEO':
                 continue
             values = {k: str(row.get(k, '')) for k in FIELDS}
-            writer.writerow({k: "'" + v if v.startswith(('=', '+', '-', '@')) else v
+            writer.writerow({k: "'" + v if v.startswith(('=', '+', '-', '@', '\t', '\r')) else v
                              for k, v in values.items()})
 
 

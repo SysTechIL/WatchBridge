@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 
-from engine import SyncEngine, Cancelled, __version__, checked_config, public_error, write_report, report_name
+from engine import SyncEngine, Cancelled, __version__, checked_config, public_error, write_report
 import runtime
 import scheduler
 import settings as storage
@@ -28,6 +28,8 @@ CONNECTION = [
     ('--qb-user', 'qb_username', 'qBittorrent Web UI username', False),
     ('--qb-password', 'qb_password', 'qBittorrent Web UI password', True),
     ('--tag', 'tag', 'existing qBittorrent tag to add (default Watched)', False),
+    ('--ca-file', 'ca_file', 'PEM certificate to trust, for https servers with a self-signed certificate '
+                             '("" = standard checks only)', False),
 ]
 ENV = {key: 'WATCHBRIDGE_' + key.upper() for _, key, _, secret in CONNECTION if secret}
 
@@ -46,6 +48,7 @@ EPILOG = '''examples:
   %(prog)s schedule show
 
 secrets: pass "-" to be prompted, or set ''' + ', '.join(ENV.values()) + '''.
+         A value typed after the option is visible to other programs and kept in shell history.
 exit codes: 0 ok, 1 failed or scan errors, 2 invalid input, 3 another run in progress,
             4 background runs paused, 130 stopped.'''
 
@@ -67,7 +70,8 @@ def parser():
     group = conn.add_argument_group('connection (overrides saved settings for this run)')
     group.add_argument('--server', choices=('plex', 'jellyfin'), dest='media_server', help='media server to read')
     for flag, key, text, secret in CONNECTION:
-        group.add_argument(flag, dest=key, metavar='VALUE', help=text + (' ("-" prompts)' if secret else ''))
+        group.add_argument(flag, dest=key, metavar='VALUE',
+                           help=text + (' ("-" prompts; a typed value is visible to other programs)' if secret else ''))
     group.add_argument('--config', metavar='FILE', help='read connection details from a config.json file')
     group.add_argument('--save', action='store_true', help='also save these connection details')
     remember = group.add_mutually_exclusive_group()
@@ -137,6 +141,7 @@ def parser():
     show.add_argument('--json', action='store_true')
     cs = csub.add_parser('set', parents=[conn], help='save connection settings')
     cs.add_argument('--interval', metavar='MIN', help='auto sync interval in minutes')
+    cs.add_argument('--keep-reports', metavar='N', help='keep the newest N automatic reports, 0 = keep all (default 100)')
     imp = csub.add_parser('import', help='import a config.json from the earlier version and save it')
     imp.add_argument('file')
     imp.add_argument('--remember', action='store_true', help='remember imported credentials (encrypted)')
@@ -182,11 +187,22 @@ def main(argv=None):
 
 # ---------- settings ----------
 
+# Why the saved settings could not be read in full, or None. Saving over them then needs an explicit choice.
+UNREADABLE = None
+
+
 def load_saved():
+    global UNREADABLE
+    UNREADABLE = None
     try:
         return storage.load()
+    except storage.Unreadable as exc:
+        UNREADABLE = str(exc)
+        print('Warning: ' + UNREADABLE + ' Using what could be read; credentials are empty.', file=sys.stderr)
+        return exc.values
     except Exception:
-        print('Warning: saved settings could not be unlocked; using defaults.', file=sys.stderr)
+        UNREADABLE = 'Saved settings could not be read.'
+        print('Warning: ' + UNREADABLE + ' Using defaults.', file=sys.stderr)
         return dict(storage.DEFAULTS)
 
 
@@ -206,6 +222,9 @@ def resolve(args):
             continue
         if secret and value == '-':
             value = getpass.getpass(flag.lstrip('-').replace('-', ' ').capitalize() + ': ')
+        elif secret:
+            print('Warning: %s on the command line is visible to other programs and kept in shell history. '
+                  'Use "%s -" to be prompted, or set %s.' % (flag, flag, ENV[key]), file=sys.stderr)
         values[key] = value
     if getattr(args, 'remember', None) is not None:
         values['remember'] = args.remember
@@ -235,11 +254,16 @@ def connection(args):
     except ValueError as exc:
         raise Exit(str(exc).replace('in Connections', 'with its option or in the window'))
     if getattr(args, 'save', False):
-        save(values)
+        save(values, replace=args.remember is not None)
     return values
 
 
-def save(values):
+def save(values, replace=False):
+    """Save settings. replace=True: the user chose what to do with credentials, so unreadable saved
+    settings may be replaced (the previous file is kept as settings.bak)."""
+    if UNREADABLE and not replace:
+        raise Exit(UNREADABLE + ' Nothing was saved, so the existing file is kept. To replace it, enter your '
+                   'credentials again and add --remember or --no-remember.', runtime.FAILED)
     if values.get('remember') and sys.platform != 'win32':
         raise Exit('Remembering credentials is supported on Windows only.')
     try:
@@ -389,7 +413,7 @@ def finish(args, rows, excluded, message):
 def export(args, rows):
     if rows and not args.no_report:
         try:
-            write_report(runtime.REPORTS / report_name(), rows)
+            runtime.save_report(rows, storage.load_plain().get('keep_reports'))
         except OSError:
             print('Could not save the automatic report.', file=sys.stderr)
     if args.csv:
@@ -545,25 +569,30 @@ def cmd_config(args):
         return runtime.OK
     if args.action == 'set':
         values = resolve(args)
-        if args.interval is not None:
-            values['interval'] = str(scheduler.number(args.interval, 'Interval', 1, 1440))
+        try:
+            if args.interval is not None:
+                values['interval'] = str(scheduler.number(args.interval, 'Interval', 1, 1440))
+            if args.keep_reports is not None:
+                values['keep_reports'] = str(scheduler.number(args.keep_reports, 'Reports to keep', 0, 100000))
+        except ValueError as exc:
+            raise Exit(str(exc))
         try:
             values = checked_config(values)
         except ValueError as exc:
             print('Warning: ' + str(exc), file=sys.stderr)
-        save(values)
+        save(values, replace=args.remember is not None)
         return runtime.OK
     if args.action == 'import':
         values = load_saved()
         values.update(read_config_file(args.file))
         values['remember'] = bool(args.remember) or values.get('remember', False)
-        save(values)
+        save(values, replace=args.remember)
         print('Imported connection details from ' + args.file)
         return runtime.OK
     if args.action == 'clear-credentials':
         values = load_saved()
         values['remember'] = False
-        save(values)
+        save(values, replace=True)
         return runtime.OK
     print('Settings: ' + str(storage.APP_DIR / 'settings.json'))
     print('Reports:  ' + str(runtime.REPORTS))

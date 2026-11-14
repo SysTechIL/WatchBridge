@@ -1,10 +1,12 @@
 """Background-run helpers shared by the window, command line, scheduled runs and the real-time agent."""
+import contextlib
 from datetime import datetime
 import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import time
 
 from engine import SyncEngine, Cancelled, public_error, write_report, report_name
 import settings as storage
@@ -86,6 +88,19 @@ class RunLock:
         return True
 
 
+@contextlib.contextmanager
+def state_lock(wait=5):
+    """Serialize read-modify-write of the state file between the window, the agent and scheduled runs."""
+    lock = RunLock(STATE_FILE.with_suffix('.lock'))
+    deadline = time.monotonic() + wait
+    while not lock.acquire() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    try:
+        yield
+    finally:
+        lock.release()
+
+
 def read_state():
     try:
         data = json.loads(STATE_FILE.read_text(encoding='utf-8'))
@@ -103,17 +118,18 @@ def write_state(state):
 
 def record(result, max_failures):
     """Store the last background run; pause background runs after repeated failures."""
-    state = read_state()
-    state['last_run'] = result
-    if result['outcome'] == 'ok':
-        state['failures'] = 0
-    elif result['outcome'] in ('failed', 'errors'):
-        state['failures'] = int(state.get('failures', 0)) + 1
-        if max_failures and state['failures'] >= max_failures and not state.get('paused'):
-            state['paused'] = True
-            log.warning('Background runs paused after %s consecutive failures. Resume them in Schedule '
-                        'or with: schedule resume', state['failures'])
-    write_state(state)
+    with state_lock():
+        state = read_state()
+        state['last_run'] = result
+        if result['outcome'] == 'ok':
+            state['failures'] = 0
+        elif result['outcome'] in ('failed', 'errors') and not state.get('paused'):
+            state['failures'] = int(state.get('failures', 0)) + 1
+            if max_failures and state['failures'] >= max_failures:
+                state['paused'] = True
+                log.warning('Background runs paused after %s consecutive failures. Resume them in Schedule '
+                            'or with: schedule resume', state['failures'])
+        write_state(state)
     return state
 
 
@@ -127,9 +143,25 @@ def record_failure(trigger, message, max_failures):
 
 
 def resume():
-    state = read_state()
-    state.update(failures=0, paused=False)
-    write_state(state)
+    with state_lock():
+        state = read_state()
+        state.update(failures=0, paused=False)
+        write_state(state)
+
+
+def save_report(rows, keep):
+    """Write an automatic report, then delete the oldest beyond `keep` (0 keeps all). Returns its path."""
+    path = REPORTS / report_name()
+    write_report(path, rows)
+    keep = _int(keep, 100)
+    if keep > 0:
+        # Names contain the time, so they sort oldest first.
+        for old in sorted(REPORTS.glob('watchbridge-*.csv'))[:-keep]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    return path
 
 
 def now_text():
@@ -180,9 +212,7 @@ def run_sync(values, trigger='manual', emit=None, cancel=None, background=True, 
     result['finished'] = now_text()
     if report and rows:
         try:
-            path = REPORTS / report_name()
-            write_report(path, rows)
-            result['report'] = str(path)
+            result['report'] = str(save_report(rows, values.get('keep_reports')))
         except OSError:
             log.warning('Could not save the automatic report.')
     (log.info if code == OK else log.error)('Sync %s: %s', result['outcome'], result['message'])

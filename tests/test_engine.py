@@ -163,6 +163,35 @@ class ApiTests(unittest.TestCase):
                {'TotalRecordCount':3,'Items':[{'UserData':{'Played':True},'Path':'M:/b.mkv'}]}]
         e=engine.SyncEngine(jf_config());e.jf=Session([Response(data=p) for p in pages]);e.jf_url='http://jf';e.jf_user_id='2'
         with self.assertRaisesRegex(RuntimeError,'changed'):e.scan_jellyfin()
+    def test_device_ids_differ_by_role(self):
+        self.assertNotEqual(engine.device_id('sync'),engine.device_id('agent'))
+        self.assertEqual(engine.device_id('sync'),engine.device_id('sync'))
+        session=Session([Response(data=[{'Name':'Viewer','Id':'2'}])])
+        with patch.dict(sys.modules,{'requests':types.SimpleNamespace(Session=lambda:session)}):
+            engine.SyncEngine(jf_config(),role='agent').connect_jellyfin()
+        self.assertIn('DeviceId="'+engine.device_id('agent')+'"',session.headers['Authorization'])
+    def test_close_logs_out(self):
+        class Closing(Session):
+            def __init__(self):super().__init__([]);self.posts=[]
+            def post(self,url,**kw):self.posts.append(url)
+        e=engine.SyncEngine(jf_config());e.qb,e.jf=Closing(),Closing();e.qb_url,e.jf_url='http://qb','http://jf'
+        e.qb_logged_in=e.jf_logged_in=True
+        e.close(logout=False);self.assertEqual((e.qb.posts,e.jf.posts),([],[]))
+        e.close();self.assertEqual((e.qb.posts,e.jf.posts),(['http://qb/api/v2/auth/logout'],['http://jf/Sessions/Logout']))
+    def test_plain_http_warning(self):
+        self.assertEqual(engine.plain_http(dict(config(),plex_url='http://nas:32400',qb_url='http://127.0.0.1:8080')),['Plex'])
+        self.assertEqual(engine.plain_http(dict(jf_config(jf_url='https://nas'),qb_url='http://nas:8080')),['qBittorrent'])
+        self.assertEqual(engine.plain_http(config()),[])
+    def test_ca_file_must_exist_and_extends_bundle(self):
+        with self.assertRaisesRegex(ValueError,'certificate'):engine.checked_config(dict(config(),ca_file='C:/missing.pem'))
+        with tempfile.TemporaryDirectory() as d:
+            pem=Path(d)/'my.pem';pem.write_bytes(b'MY-CERT')
+            self.assertEqual(engine.checked_config(dict(config(),ca_file='"'+str(pem)+'"'))['ca_file'],str(pem))
+            bundle=Path(engine.ca_bundle(str(pem)))
+            try:
+                data=bundle.read_bytes();self.assertTrue(data.endswith(b'MY-CERT'));self.assertGreater(len(data),1000)
+            finally:bundle.unlink()
+        self.assertIs(engine.ca_bundle(''),True)
     def test_plex_remains_default(self):
         self.assertEqual(engine.SyncEngine(config()).server,'plex')
         self.assertEqual(engine.SyncEngine(jf_config()).server,'jellyfin')
@@ -186,6 +215,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(e.apply([{'hash':'abc','torrent':'Film','status':'READY'}]),1)
         self.assertEqual(calls,['torrents/info','torrents/files','torrents/addTags','torrents/info'])
         self.assertEqual([data['status'] for kind,data in events if kind=='updated'],['TAGGED'])
+        self.assertEqual([data for kind,data in events if kind=='progress'],[(0,1),(1,1)])
     def test_apply_rechecks_unwatched(self):
         e=engine.SyncEngine(config());e.connect=lambda:None;e.scan_plex=lambda:{engine.norm('M:/film.mkv'):[False]}
         def request(endpoint,data=None,params=None):
@@ -205,6 +235,9 @@ class StorageTests(unittest.TestCase):
             engine.write_report(p,[{'status':'NO_VIDEO','torrent':'book'}, {'status':'READY','torrent':'=danger','hash':'abc','video_files':1}])
             with p.open(encoding='utf-8-sig',newline='') as f:rows=list(csv.DictReader(f))
             self.assertEqual(len(rows),1);self.assertEqual(rows[0]['torrent'],"'=danger")
+            engine.write_report(p,[{'status':'READY','torrent':'\tcmd','hash':'\rx'}])
+            with p.open(encoding='utf-8-sig',newline='') as f:rows=list(csv.DictReader(f))
+            self.assertEqual((rows[0]['torrent'],rows[0]['hash']),("'\tcmd","'\rx"))
     def test_settings_do_not_store_plaintext_secrets(self):
         with tempfile.TemporaryDirectory() as d,patch.object(settings,'APP_DIR',Path(d)):
             settings.save(config())
@@ -215,6 +248,25 @@ class StorageTests(unittest.TestCase):
             text=(Path(d)/'settings.json').read_text()
             self.assertNotIn('fake-key',text);self.assertNotIn('fake-jf-password',text)
             self.assertEqual(settings.load()['media_server'],'jellyfin')
+    def test_unreadable_credentials_keep_other_settings(self):
+        def fake_protect(data,decrypt=False):
+            if decrypt:raise RuntimeError('locked')
+            return data
+        with tempfile.TemporaryDirectory() as d,patch.object(settings,'APP_DIR',Path(d)),patch.object(settings,'protect',fake_protect):
+            settings.save(dict(config(),remember=True,qb_url='http://nas:8080',schedule_mode='daily'))
+            with self.assertRaises(settings.Unreadable) as ctx:settings.load()
+            v=ctx.exception.values
+            self.assertEqual((v['qb_url'],v['schedule_mode'],v['plex_token']),('http://nas:8080','daily',''))
+            self.assertEqual(settings.load_plain()['qb_url'],'http://nas:8080')
+            settings.save_local(keep_reports='20',qb_url='ignored')
+            data=json.loads((Path(d)/'settings.json').read_text())
+            self.assertEqual((data['keep_reports'],data['qb_url']),('20','http://nas:8080'))
+            self.assertIn('protected_credentials',data)
+            settings.save(dict(config(),remember=False))
+            self.assertIn('protected_credentials',(Path(d)/'settings.bak').read_text())
+            (Path(d)/'settings.json').write_text('{broken')
+            with self.assertRaises(settings.Unreadable):settings.load()
+            self.assertEqual(settings.load_plain(),{k:('' if k in settings.SECRETS else v) for k,v in settings.DEFAULTS.items()})
     def test_encrypted_round_trip_contract(self):
         def fake_protect(data,decrypt=False):return data[::-1]
         with tempfile.TemporaryDirectory() as d,patch.object(settings,'APP_DIR',Path(d)),patch.object(settings,'protect',fake_protect):

@@ -33,3 +33,29 @@ watchbridge-*.csv
 .vscode/
 Thumbs.db
 .DS_Store
+
+# Local session files
+**/.codex/sessions/
+**/.codex/archived_sessions/
+**/.codex/history.jsonl
+**/.codex/session_index.jsonl
+**/.codex/shell_snapshots/
+**/.codex/worktrees/
+**/.claude/projects/
+**/.claude/sessions/
+**/.claude/session-env/
+**/.claude/history.jsonl
+**/.claude/file-history/
+**/.claude/transcripts/
+**/.claude/shell-snapshots/
+**/.claude/worktrees/
+**/session-files/
+**/session_files/
+**/session files/
+**/playwright/.auth/
+**/auth_info_baileys/
+**/.wwebjs_auth/
+*.session
+*.session-journal
+*.session-wal
+*.session-shm
